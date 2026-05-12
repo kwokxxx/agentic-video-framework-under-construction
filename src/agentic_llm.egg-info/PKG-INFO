@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: agentic-llm
+Version: 0.1.0
+Summary: Minimal Agentic LLM runtime based on the design notes.
+Requires-Python: >=3.11
+Requires-Dist: openai>=1.0.0

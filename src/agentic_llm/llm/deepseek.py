@@ -48,6 +48,7 @@ class DeepSeekProvider:
         kwargs: dict[str, Any] = {
             "model": self._settings.model,
             "messages": messages,
+            "extra_body": {"thinking": {"type": "disabled"}},
         }
         if tools:
             kwargs["tools"] = tools
@@ -87,4 +88,3 @@ class DeepSeekProvider:
             tool_calls=tool_calls,
             raw=response,
         )
-

@@ -23,13 +23,13 @@ Install the package in editable mode:
 python3 -m pip install -e .
 ```
 
-Set the DeepSeek API key through the environment. Do not write the key into source files or logs.
+Create a local `.env` file from `.env.example`, then fill in your DeepSeek API key. Do not commit `.env` or write the key into source files or logs.
 
 ```bash
-export DEEPSEEK_API_KEY="..."
-export DEEPSEEK_BASE_URL="https://api.deepseek.com"
-export DEEPSEEK_MODEL="deepseek-v4-pro"
+cp .env.example .env
 ```
+
+Use `deepseek-v4-flash` first to keep smoke tests cheap. Switch to `deepseek-v4-pro` when quality matters more than cost.
 
 Optional bootstrap files can be placed at the workspace root:
 
@@ -61,4 +61,3 @@ The test suite uses a fake LLM provider and does not call DeepSeek:
 ```bash
 python3 -m unittest discover -s tests
 ```
-
