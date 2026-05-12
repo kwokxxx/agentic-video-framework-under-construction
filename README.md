@@ -23,23 +23,25 @@ Install the package in editable mode:
 python3 -m pip install -e .
 ```
 
-Create a local `.env` file from `.env.example`, then fill in your DeepSeek API key. Do not commit `.env` or write the key into source files or logs.
+Create a local `.env` file in the project root, then fill in your DeepSeek API key. Do not commit `.env` or write the key into source files or logs.
 
-```bash
-cp .env.example .env
+```text
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 ```
 
 Use `deepseek-v4-flash` first to keep smoke tests cheap. Switch to `deepseek-v4-pro` when quality matters more than cost.
 
-Optional bootstrap files can be placed at the workspace root:
+Bootstrap files live at the workspace root:
 
 ```text
-AGENT.md
-USER.md
-TOOLS.md
+AGENT.md  # agent role, architecture awareness, operating constraints
+USER.md   # stable user and project preferences
+TOOLS.md  # tool usage notes and current tool gaps
 ```
 
-If they are absent, the runtime uses a minimal system prompt and continues.
+The runtime loads these files into the system prompt on every run. If one is absent, the runtime skips it and continues.
 
 ## Run
 
