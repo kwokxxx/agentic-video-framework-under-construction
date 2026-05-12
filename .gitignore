@@ -1,0 +1,9 @@
+.env
+.agentic_llm/
+docs/
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
