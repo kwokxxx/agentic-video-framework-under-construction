@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agentic Video Framework</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <div class="mono-label">AGENTIC VIDEO FRAMEWORK</div>
+          <h1>Runtime Console</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="status-pill" id="modelStatus">MODEL</div>
+          <div class="view-switch" role="tablist" aria-label="View switch">
+            <button class="view-tab active" data-view="user" type="button">User</button>
+            <button class="view-tab" data-view="developer" type="button">Developer</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel user-view active" id="userView">
+          <div class="conversation-header">
+            <div>
+              <div class="mono-label">USER VIEW</div>
+              <h2>Agent Session</h2>
+            </div>
+            <label class="session-control">
+              <span>Session</span>
+              <input id="sessionInput" value="demo" autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="message-list" id="messageList" aria-live="polite">
+            <div class="empty-state">
+              <div class="mono-label">READY</div>
+              <p>Send a task. The request will pass through MQ, Agent Loop, DeepSeek, ToolRegistry, and persistence.</p>
+            </div>
+          </div>
+
+          <div class="prompt-strip" aria-label="Prompt shortcuts">
+            <button type="button" data-prompt="Read README.md and summarize the current runtime." class="prompt-chip">Summarize runtime</button>
+            <button type="button" data-prompt="Use grep_file to find where AgentMainLoop is implemented." class="prompt-chip">Find MainLoop</button>
+            <button type="button" data-prompt="Explain what tools are currently available." class="prompt-chip">List tools</button>
+          </div>
+
+          <form class="composer" id="chatForm">
+            <textarea id="messageInput" rows="3" placeholder="Ask the agent to inspect code, summarize files, or explain the runtime flow."></textarea>
+            <button type="submit" id="sendButton">Send</button>
+          </form>
+        </section>
+
+        <section class="panel developer-view" id="developerView">
+          <div class="developer-grid">
+            <div class="dev-section runtime-map-section">
+              <div class="section-header">
+                <div>
+                  <div class="mono-label">DEVELOPER VIEW</div>
+                  <h2>System Dataflow</h2>
+                </div>
+                <button type="button" id="refreshButton" class="outline-button">Refresh</button>
+              </div>
+              <canvas id="runtimeCanvas" width="980" height="320" aria-label="Runtime dataflow map"></canvas>
+            </div>
+
+            <div class="dev-section status-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">STATUS</div>
+                  <h3>Runtime</h3>
+                </div>
+              </div>
+              <dl class="status-grid" id="statusGrid"></dl>
+            </div>
+
+            <div class="dev-section tools-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">REGISTRY</div>
+                  <h3>Tools</h3>
+                </div>
+              </div>
+              <div class="tool-list" id="toolList"></div>
+            </div>
+
+            <div class="dev-section event-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">TRACE</div>
+                  <h3>Event Stream</h3>
+                </div>
+              </div>
+              <div class="event-list" id="eventList"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

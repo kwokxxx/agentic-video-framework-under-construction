@@ -11,6 +11,12 @@ dependencies = [
     "openai>=1.0.0",
 ]
 
+[project.scripts]
+agentic-llm-web = "agentic_llm.web.app:main"
+agentic-llm-web-dev = "agentic_llm.web.dev:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"agentic_llm.web" = ["static/*"]

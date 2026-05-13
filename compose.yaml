@@ -1,0 +1,19 @@
+services:
+  web:
+    build: .
+    image: agentic-video-framework
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command:
+      - python
+      - -m
+      - agentic_llm.web.dev
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+

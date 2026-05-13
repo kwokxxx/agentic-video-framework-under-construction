@@ -49,12 +49,56 @@ The runtime loads these files into the system prompt on every run. If one is abs
 python3 -m agentic_llm "Read README.md and summarize it."
 ```
 
+## Web Console
+
+Start the local project console with hot reload:
+
+```bash
+python3 -m agentic_llm.web.dev --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000`.
+
+The dev runner watches Python files, web static files, `.env`, and Bootstrap files. When they change, it restarts the inner web server. Refresh the browser after front-end changes.
+
+The console has two views:
+
+- User: normal Agent usage through the current MQ and Agent loop.
+- Developer: runtime status, MQ flow, session routing, LLM iteration events, tool execution events, and persistence traces.
+
 Runtime state is written under `.agentic_llm/`:
 
 ```text
 .agentic_llm/history/
 .agentic_llm/checkpoints/
 ```
+
+## Docker
+
+For development, use Docker Compose. It builds the image, loads `.env`, mounts the project into `/app`, and runs the hot reload server:
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:8000`.
+
+After the first build, use this for normal development:
+
+```bash
+docker compose up
+```
+
+The Compose service watches Python files, front-end files, `.env`, and Bootstrap files. When they change, it restarts the inner web server. Refresh the browser after front-end changes.
+
+Use plain Docker only when you want to run the image without Compose:
+
+```bash
+docker build -t agentic-video-framework .
+docker run --env-file .env -p 8000:8000 -v "$(pwd):/app" agentic-video-framework
+```
+
+Rebuild only when `Dockerfile`, `pyproject.toml`, or dependency installation changes.
 
 ## Test
 
