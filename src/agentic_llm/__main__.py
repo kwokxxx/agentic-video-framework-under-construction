@@ -7,6 +7,7 @@ from pathlib import Path
 from agentic_llm.agent_loop import AgentOnceRun
 from agentic_llm.context import ContextBuilder
 from agentic_llm.llm import DeepSeekProvider
+from agentic_llm.mq import AgentMainLoop, InboundMessage, InMemoryMessageQueue
 from agentic_llm.runtime import CheckpointStore, CompositeHook
 from agentic_llm.session import JsonlHistoryStore
 from agentic_llm.tools import GrepFileTool, ReadFileTool, ToolRegistry
@@ -34,9 +35,16 @@ async def _run(prompt: str, session_id: str, workspace_root: Path) -> None:
         checkpoint_store=checkpoint_store,
         hook=CompositeHook(),
     )
-    result = await agent.run(session_id=session_id, user_prompt=prompt)
-    if result.content:
-        print(result.content)
+    queue = InMemoryMessageQueue()
+    main_loop = AgentMainLoop(queue=queue, agent=agent)
+    await queue.publish_inbound(
+        InboundMessage(session_id=session_id, content=prompt)
+    )
+    await main_loop.process_once()
+    outbound = await queue.consume_outbound()
+    queue.acknowledge_outbound()
+    if outbound.content:
+        print(outbound.content)
 
 
 def main() -> None:
@@ -49,4 +57,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
