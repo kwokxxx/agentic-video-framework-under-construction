@@ -1,8 +1,18 @@
+const SESSION_STORAGE_KEY = "agentic_llm.session_id";
+const DRAFT_STORAGE_KEY = "agentic_llm.session_drafts";
+const ACTIVE_TRACE_WINDOW_MS = 30000;
+const ACTIVE_TRACE_LIMIT = 12;
+
 const state = {
   view: "user",
   trace: [],
   status: null,
+  sessions: [],
+  currentSession: readStoredSessionId() || "demo",
   busy: false,
+  seenMessages: new Set(),
+  seenLiveHooks: new Set(),
+  liveTraceTimer: null,
 };
 
 const els = {
@@ -14,9 +24,17 @@ const els = {
   messageInput: document.querySelector("#messageInput"),
   sendButton: document.querySelector("#sendButton"),
   sessionInput: document.querySelector("#sessionInput"),
+  openSessionButton: document.querySelector("#openSessionButton"),
+  sessionList: document.querySelector("#sessionList"),
+  currentSessionLabel: document.querySelector("#currentSessionLabel"),
   messageList: document.querySelector("#messageList"),
   statusGrid: document.querySelector("#statusGrid"),
+  contextGrid: document.querySelector("#contextGrid"),
   toolList: document.querySelector("#toolList"),
+  skillList: document.querySelector("#skillList"),
+  memoryList: document.querySelector("#memoryList"),
+  cronList: document.querySelector("#cronList"),
+  subagentList: document.querySelector("#subagentList"),
   eventList: document.querySelector("#eventList"),
   runtimeCanvas: document.querySelector("#runtimeCanvas"),
   refreshButton: document.querySelector("#refreshButton"),
@@ -33,6 +51,185 @@ function setView(view) {
   }
 }
 
+function normalizeSessionId(value) {
+  return String(value || "").trim() || "default";
+}
+
+function readStoredSessionId() {
+  try {
+    return localStorage.getItem(SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionId(sessionId) {
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  } catch {
+    return;
+  }
+}
+
+function getSessionId() {
+  return normalizeSessionId(state.currentSession);
+}
+
+function readDrafts() {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeDrafts(drafts) {
+  try {
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  } catch {
+    return;
+  }
+}
+
+function saveDraftForSession(sessionId, value) {
+  const normalized = normalizeSessionId(sessionId);
+  const drafts = readDrafts();
+  if (value) {
+    drafts[normalized] = value;
+  } else {
+    delete drafts[normalized];
+  }
+  writeDrafts(drafts);
+}
+
+function clearDraftForSession(sessionId) {
+  saveDraftForSession(sessionId, "");
+}
+
+function saveCurrentDraft() {
+  saveDraftForSession(state.currentSession, els.messageInput.value);
+}
+
+function restoreDraftForSession(sessionId) {
+  const drafts = readDrafts();
+  els.messageInput.value = drafts[normalizeSessionId(sessionId)] || "";
+}
+
+async function setSessionId(sessionId, { loadHistory = true, saveDraft = true } = {}) {
+  if (saveDraft) {
+    saveCurrentDraft();
+  }
+  const normalized = normalizeSessionId(sessionId);
+  state.currentSession = normalized;
+  els.currentSessionLabel.textContent = normalized;
+  persistSessionId(normalized);
+  renderSessionOptions();
+  if (loadHistory) {
+    await loadSessionHistory(normalized);
+  }
+  restoreDraftForSession(normalized);
+}
+
+async function createSessionFromInput() {
+  const requested = els.sessionInput.value.trim();
+  const sessionId = normalizeSessionId(requested || `session-${Date.now()}`);
+  const exists = state.sessions.some((session) => normalizeSessionId(session.id) === sessionId);
+  if (!exists) {
+    clearDraftForSession(sessionId);
+  }
+  await setSessionId(sessionId);
+  els.sessionInput.value = "";
+  els.messageInput.focus();
+}
+
+async function loadSessions() {
+  const response = await fetch("/api/sessions");
+  const payload = await response.json();
+  state.sessions = payload.sessions || [];
+  renderSessionOptions();
+}
+
+function renderSessionOptions() {
+  const current = normalizeSessionId(state.currentSession);
+  const seen = new Set();
+  const sessions = [];
+  [...state.sessions, { id: current, message_count: 0 }].forEach((session) => {
+    const id = normalizeSessionId(session.id);
+    if (seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    sessions.push({ ...session, id, persisted: state.sessions.some((item) => normalizeSessionId(item.id) === id) });
+  });
+  els.sessionList.innerHTML = sessions
+    .map((session) => {
+      const count = Number(session.message_count || 0);
+      const activeClass = session.id === current ? " active" : "";
+      const meta = count ? `${count} messages` : "No messages";
+      const deleteButton = session.persisted
+        ? `<button type="button" class="session-delete" data-session="${escapeHtml(session.id)}" aria-label="Delete ${escapeHtml(session.id)}">Delete</button>`
+        : "";
+      return `<div class="session-item${activeClass}" data-session="${escapeHtml(session.id)}">
+        <button type="button" class="session-open" data-session="${escapeHtml(session.id)}">
+          <span class="session-name">${escapeHtml(session.id)}</span>
+          <span class="session-meta">${escapeHtml(meta)}</span>
+        </button>
+        ${deleteButton}
+      </div>`;
+    })
+    .join("");
+}
+
+async function deleteSession(sessionId) {
+  const normalized = normalizeSessionId(sessionId);
+  if (!window.confirm(`Delete conversation "${normalized}"?`)) {
+    return;
+  }
+  saveCurrentDraft();
+  const response = await fetch(`/api/session?session_id=${encodeURIComponent(normalized)}`, {
+    method: "DELETE",
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to delete session");
+  }
+  clearDraftForSession(normalized);
+  await loadSessions();
+  if (normalizeSessionId(state.currentSession) === normalized) {
+    const nextSession = state.sessions[0] ? normalizeSessionId(state.sessions[0].id) : "demo";
+    await setSessionId(nextSession, { saveDraft: false });
+  } else {
+    renderSessionOptions();
+  }
+}
+
+async function loadSessionHistory(sessionId = getSessionId()) {
+  const normalized = normalizeSessionId(sessionId);
+  const response = await fetch(`/api/history?session_id=${encodeURIComponent(normalized)}`);
+  const payload = await response.json();
+  if (normalizeSessionId(state.currentSession) !== normalized) {
+    return;
+  }
+  renderHistoryMessages(payload.messages || []);
+}
+
+function renderHistoryMessages(messages) {
+  state.seenMessages = new Set(messages.map((message) => message.id));
+  els.messageList.innerHTML = "";
+  if (!messages.length) {
+    renderEmptyMessages();
+    return;
+  }
+  messages.forEach((message) => addMessage(message.role, message.content || ""));
+}
+
+function renderEmptyMessages() {
+  els.messageList.innerHTML = `<div class="empty-state">
+    <div class="mono-label">READY</div>
+    <p>No messages in this session yet.</p>
+  </div>`;
+}
+
 function addMessage(role, content) {
   const empty = els.messageList.querySelector(".empty-state");
   if (empty) {
@@ -46,6 +243,82 @@ function addMessage(role, content) {
   return node;
 }
 
+function startLiveTracePolling() {
+  stopLiveTracePolling();
+  refreshTrace();
+  state.liveTraceTimer = window.setInterval(refreshTrace, 800);
+}
+
+function stopLiveTracePolling() {
+  if (!state.liveTraceTimer) {
+    return;
+  }
+  window.clearInterval(state.liveTraceTimer);
+  state.liveTraceTimer = null;
+}
+
+function renderLiveToolHooks(trace) {
+  if (!state.busy) {
+    return;
+  }
+  const currentSession = getSessionId();
+  trace.forEach((event) => {
+    if (event.session_id !== currentSession) {
+      return;
+    }
+    if (event.type !== "tool.call" && event.type !== "tool.executed") {
+      return;
+    }
+    const tools = (event.metadata && event.metadata.tools) || [];
+    tools.forEach((tool, index) => {
+      const hookId = `${event.id}:${tool.id || tool.name || index}:${event.type}`;
+      if (state.seenLiveHooks.has(hookId)) {
+        return;
+      }
+      state.seenLiveHooks.add(hookId);
+      addMessage("system", formatLiveToolHook(event.type, tool));
+    });
+  });
+}
+
+function formatLiveToolHook(type, tool) {
+  if (type === "tool.call") {
+    const details = formatSafeToolDetails(tool.arguments || {});
+    return [`Tool call: ${tool.name || "unknown"}`, details].filter(Boolean).join("\n");
+  }
+
+  const details = formatSafeToolDetails({
+    ...(tool.metadata || {}),
+    content_chars: tool.content_chars,
+    duration_ms: tool.duration_ms,
+  });
+  return [`Tool result: ${tool.name || "unknown"} / ${tool.status || "success"}`, details].filter(Boolean).join("\n");
+}
+
+function formatSafeToolDetails(values) {
+  const safeKeys = [
+    "action",
+    "chars",
+    "content_chars",
+    "duration_ms",
+    "kind",
+    "matches",
+    "max_chars",
+    "max_matches",
+    "name",
+    "path",
+    "pattern",
+    "replacements",
+    "status",
+    "truncated",
+    "url",
+  ];
+  return safeKeys
+    .filter((key) => values[key] !== undefined && values[key] !== null && values[key] !== "")
+    .map((key) => `${key}: ${values[key]}`)
+    .join("\n");
+}
+
 function setBusy(busy) {
   state.busy = busy;
   els.sendButton.disabled = busy;
@@ -54,10 +327,13 @@ function setBusy(busy) {
 }
 
 async function sendMessage(message) {
-  const sessionId = els.sessionInput.value.trim() || "default";
+  const sessionId = getSessionId();
+  await setSessionId(sessionId, { loadHistory: false, saveDraft: false });
   addMessage("user", message);
   const pending = addMessage("system", "MQ INBOUND -> AGENT LOOP");
   setBusy(true);
+  state.seenLiveHooks = new Set();
+  startLiveTracePolling();
 
   try {
     const response = await fetch("/api/chat", {
@@ -69,15 +345,20 @@ async function sendMessage(message) {
     if (!response.ok) {
       throw new Error(payload.error || "Agent request failed");
     }
+    stopLiveTracePolling();
+    state.busy = false;
     pending.remove();
-    addMessage("assistant", payload.message.content || "");
+    state.seenMessages.add(payload.message.id);
     state.trace = payload.trace || state.trace;
+    await loadSessions();
+    await loadSessionHistory(sessionId);
     await loadStatus();
     renderTrace();
     drawRuntimeMap();
   } catch (error) {
     pending.textContent = `ERROR: ${error.message}`;
   } finally {
+    stopLiveTracePolling();
     setBusy(false);
   }
 }
@@ -89,16 +370,49 @@ async function loadStatus() {
   state.trace = payload.trace || state.trace;
   renderStatus();
   renderTools();
+  renderRuntimeExtensions();
   renderTrace();
   drawRuntimeMap();
+}
+
+async function refreshDeveloperView() {
+  await loadStatus();
+  await refreshTrace();
+}
+
+async function pollBackgroundMessages() {
+  const sessionId = getSessionId();
+  const response = await fetch(`/api/messages?session_id=${encodeURIComponent(sessionId)}`);
+  const payload = await response.json();
+  const messages = payload.messages || [];
+  messages.forEach((message) => {
+    if (state.seenMessages.has(message.id)) {
+      return;
+    }
+    state.seenMessages.add(message.id);
+    addMessage("assistant", message.content || "");
+  });
+  if (messages.length) {
+    await loadSessions();
+  }
 }
 
 async function refreshTrace() {
   const response = await fetch("/api/trace?limit=120");
   const payload = await response.json();
   state.trace = payload.trace || [];
+  renderLiveToolHooks(state.trace);
   renderTrace();
   drawRuntimeMap();
+}
+
+async function initialize() {
+  els.sessionInput.value = "";
+  els.currentSessionLabel.textContent = state.currentSession;
+  await loadStatus();
+  await loadSessions();
+  await loadSessionHistory(state.currentSession);
+  restoreDraftForSession(state.currentSession);
 }
 
 function renderStatus() {
@@ -129,6 +443,84 @@ function renderTools() {
         <div class="tool-description">${escapeHtml(tool.description)}</div>
       </div>`;
     })
+    .join("");
+}
+
+function renderRuntimeExtensions() {
+  renderContextCompression();
+  renderSkills();
+  renderMemory();
+  renderCronJobs();
+  renderSubAgents();
+}
+
+function renderContextCompression() {
+  const report = (state.status && state.status.context_compression) || {};
+  const rows = [
+    ["original", String(report.original_records || 0)],
+    ["final", String(report.final_records || 0)],
+    ["folded_tools", String(report.folded_tool_results || 0)],
+    ["pruned", String(report.pruned_records || 0)],
+    ["summary", report.summary_created ? "yes" : "no"],
+    ["stages", (report.stages || []).join(" / ") || "-"],
+  ];
+  els.contextGrid.innerHTML = rows
+    .map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`)
+    .join("");
+}
+
+function renderSkills() {
+  const skills = (state.status && state.status.skills) || [];
+  if (!skills.length) {
+    els.skillList.innerHTML = `<div class="tool-item"><div class="tool-name">No skills loaded</div><div class="tool-description">Create workspace skills under skills/*/SKILL.md.</div></div>`;
+    return;
+  }
+  els.skillList.innerHTML = skills
+    .map((skill) => `<div class="tool-item">
+      <div class="tool-name">${escapeHtml(skill.name)} ${skill.always ? "(always)" : ""}</div>
+      <div class="tool-description">${escapeHtml(skill.description)}</div>
+      <div class="event-meta">${escapeHtml(skill.location)}</div>
+    </div>`)
+    .join("");
+}
+
+function renderMemory() {
+  const memories = (state.status && state.status.memory) || [];
+  els.memoryList.innerHTML = memories
+    .map((memory) => `<div class="tool-item">
+      <div class="tool-name">${escapeHtml(memory.filename)} / ${memory.exists ? "present" : "missing"}</div>
+      <div class="tool-description">${escapeHtml(memory.description)}</div>
+    </div>`)
+    .join("");
+}
+
+function renderCronJobs() {
+  const jobs = (state.status && state.status.cron_jobs) || [];
+  if (!jobs.length) {
+    els.cronList.innerHTML = `<div class="tool-item"><div class="tool-name">No jobs</div><div class="tool-description">CronTool jobs will appear here after creation.</div></div>`;
+    return;
+  }
+  els.cronList.innerHTML = jobs
+    .map((job) => `<div class="tool-item">
+      <div class="tool-name">${escapeHtml(job.id)} / ${job.enabled ? "enabled" : "disabled"}</div>
+      <div class="tool-description">${escapeHtml(job.description)}</div>
+      <div class="event-meta">next_run_at_ms=${escapeHtml(job.state && job.state.next_run_at_ms)} / schedule=${escapeHtml(job.schedule && (job.schedule.expr || job.schedule.kind))}</div>
+    </div>`)
+    .join("");
+}
+
+function renderSubAgents() {
+  const tasks = (state.status && state.status.subagents) || [];
+  if (!tasks.length) {
+    els.subagentList.innerHTML = `<div class="tool-item"><div class="tool-name">No SubAgents</div><div class="tool-description">SpawnTool tasks will appear here while running or after completion.</div></div>`;
+    return;
+  }
+  els.subagentList.innerHTML = tasks
+    .map((task) => `<div class="tool-item">
+      <div class="tool-name">${escapeHtml(task.id)} / ${escapeHtml(task.status)}</div>
+      <div class="tool-description">${escapeHtml(task.prompt)}</div>
+      <div class="event-meta">${escapeHtml(task.error || task.result || "")}</div>
+    </div>`)
     .join("");
 }
 
@@ -178,7 +570,7 @@ function drawRuntimeMap() {
   const width = rect.width;
   const y = 145;
   const gap = width / (nodes.length + 1);
-  const recentTypes = new Set((state.trace || []).slice(-12).map((event) => event.type));
+  const recentEvents = getActiveTraceEvents(state.trace || []);
 
   ctx.lineWidth = 1;
   ctx.strokeStyle = "#363a3f";
@@ -195,7 +587,7 @@ function drawRuntimeMap() {
 
   nodes.forEach(([title, subtitle], index) => {
     const x = gap * (index + 1);
-    const active = isNodeActive(title, recentTypes);
+    const active = isNodeActive(title, recentEvents);
     ctx.beginPath();
     ctx.roundRect(x - 54, y - 42, 108, 84, 8);
     ctx.fillStyle = active ? "#ffffff" : "#191919";
@@ -217,14 +609,26 @@ function drawRuntimeMap() {
   ctx.fillText("Runtime path: Web -> MQ -> Session Router -> AgentOnceRun -> LLM/Tools -> History/Checkpoint -> MQ", 18, 292);
 }
 
-function isNodeActive(title, recentTypes) {
-  if (title === "MQ In") return recentTypes.has("mq.inbound");
-  if (title === "MQ Out") return recentTypes.has("mq.outbound");
-  if (title === "Agent") return recentTypes.has("agent.iteration") || recentTypes.has("agent.finalize");
-  if (title === "LLM") return recentTypes.has("llm.response");
-  if (title === "Tools") return recentTypes.has("tool.executed");
-  if (title === "Store") return recentTypes.has("session.history");
-  if (title === "Router") return recentTypes.has("mq.inbound");
+function getActiveTraceEvents(trace) {
+  const now = Date.now();
+  return trace
+    .slice(-ACTIVE_TRACE_LIMIT)
+    .filter((event) => event.created_at_ms && now - event.created_at_ms <= ACTIVE_TRACE_WINDOW_MS);
+}
+
+function hasEvent(events, type, predicate = null) {
+  return events.some((event) => event.type === type && (!predicate || predicate(event)));
+}
+
+function isNodeActive(title, recentEvents) {
+  if (title === "User") return hasEvent(recentEvents, "user.prompt");
+  if (title === "MQ In") return hasEvent(recentEvents, "mq.inbound");
+  if (title === "MQ Out") return hasEvent(recentEvents, "mq.outbound");
+  if (title === "Agent") return hasEvent(recentEvents, "agent.iteration") || hasEvent(recentEvents, "agent.finalize");
+  if (title === "LLM") return hasEvent(recentEvents, "llm.response");
+  if (title === "Tools") return hasEvent(recentEvents, "tool.call") || hasEvent(recentEvents, "tool.executed");
+  if (title === "Store") return hasEvent(recentEvents, "session.history");
+  if (title === "Router") return hasEvent(recentEvents, "mq.inbound");
   return false;
 }
 
@@ -253,6 +657,7 @@ els.chatForm.addEventListener("submit", (event) => {
     return;
   }
   els.messageInput.value = "";
+  clearDraftForSession(state.currentSession);
   sendMessage(message);
 });
 
@@ -263,19 +668,50 @@ els.messageInput.addEventListener("keydown", (event) => {
   }
 });
 
+els.messageInput.addEventListener("input", () => {
+  saveCurrentDraft();
+});
+
 els.promptChips.forEach((chip) => {
   chip.addEventListener("click", () => {
     els.messageInput.value = chip.dataset.prompt || "";
+    saveCurrentDraft();
     els.messageInput.focus();
   });
 });
 
+els.sessionList.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest(".session-delete");
+  if (deleteButton) {
+    deleteSession(deleteButton.dataset.session).catch((error) => {
+      addMessage("system", `ERROR: ${error.message}`);
+    });
+    return;
+  }
+  const openButton = event.target.closest(".session-open");
+  if (!openButton) {
+    return;
+  }
+  setSessionId(openButton.dataset.session);
+});
+
+els.sessionInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    createSessionFromInput();
+  }
+});
+
+els.openSessionButton.addEventListener("click", () => {
+  createSessionFromInput();
+});
+
 els.refreshButton.addEventListener("click", () => {
-  loadStatus();
-  refreshTrace();
+  refreshDeveloperView();
 });
 
 window.addEventListener("resize", drawRuntimeMap);
 
-loadStatus();
+initialize();
 setInterval(refreshTrace, 5000);
+setInterval(pollBackgroundMessages, 5000);

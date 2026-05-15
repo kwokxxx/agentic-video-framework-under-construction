@@ -2,18 +2,36 @@
 
 Minimal code scaffold for the Agentic LLM design recorded in `docs/agentic-llm-design-notes.md`.
 
-The first implementation focuses on the smallest runnable loop:
+The implementation now includes the core runtime pieces from the design notes:
 
 ```text
 User prompt
+-> MQ InBound
+-> Session routing
 -> ContextBuilder
 -> DeepSeekProvider
 -> ToolRegistry
--> Tool execution
+-> Tool execution / Tool batches
 -> Tool result returned to the model
 -> Final answer
+-> MQ OutBound
 -> JSONL history
 ```
+
+Implemented runtime capabilities:
+
+- Bootstrap context from `AGENT.md`, `USER.md`, and `TOOLS.md`.
+- JSONL session history with structured answer events.
+- Tool call loop with max iteration protection and checkpointed tool results.
+- Read, write, edit, grep, web search, URL fetch, memory rewrite, skill read, cron, and spawn-subagent tools.
+- Tool batch execution: read-only non-exclusive tools run in parallel, exclusive tools run as serial barriers.
+- Skill loader for `skills/*/SKILL.md` with frontmatter metadata and a system prompt Skill Index.
+- Markdown memory store backed by `USER.md` and `TOOLS.md`.
+- Context compression that folds old tool results, prunes old history, and summarizes old QA when needed.
+- CronJob file store plus background scheduler for due jobs.
+- SubAgent manager that runs isolated background agents and returns `system_subagent` messages to the parent session.
+- MCP config/client/tool adapter for enabled MCP tools exposed by configured servers.
+- Web console with user and developer views.
 
 ## Setup
 
@@ -43,6 +61,14 @@ TOOLS.md  # tool usage notes and current tool gaps
 
 The runtime loads these files into the system prompt on every run. If one is absent, the runtime skips it and continues.
 
+Skills live under:
+
+```text
+skills/<skill-name>/SKILL.md
+```
+
+Each `SKILL.md` should include frontmatter with `name`, `description`, and optional `always`. The runtime injects the Skill Index by default; the Agent can call `read_skill` when it needs the full SOP.
+
 ## Run
 
 ```bash
@@ -71,7 +97,10 @@ Runtime state is written under `.agentic_llm/`:
 ```text
 .agentic_llm/history/
 .agentic_llm/checkpoints/
+.agentic_llm/cron/jobs.json
 ```
+
+Developer view exposes the current tool registry, skills, memory stores, Cron jobs, SubAgent tasks, context compression report, MQ events, LLM iterations, tool execution events, and persistence traces.
 
 ## Docker
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from agentic_llm.context.compressor import ContextCompressionReport, ContextCompressor
 from agentic_llm.session.history import JsonlHistoryStore
+from agentic_llm.skills import SkillLoader
 
 
 class ContextBuilder:
@@ -13,20 +15,28 @@ class ContextBuilder:
         workspace_root: Path | str,
         history_store: JsonlHistoryStore,
         runtime_context_provider: Callable[[], str] | None = None,
+        skill_loader: SkillLoader | None = None,
+        compressor: ContextCompressor | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root).resolve()
         self._history_store = history_store
         self._runtime_context_provider = runtime_context_provider
+        self._skill_loader = skill_loader
+        self._compressor = compressor or ContextCompressor()
+        self.last_compression_report = ContextCompressionReport()
 
-    def build_messages(self, *, session_id: str, user_prompt: str) -> list[dict[str, str]]:
-        messages: list[dict[str, str]] = [
+    def build_messages(self, *, session_id: str, user_prompt: str) -> list[dict[str, object]]:
+        messages: list[dict[str, object]] = [
             {
                 "role": "system",
                 "content": self._build_system_prompt(),
             }
         ]
 
-        for record in self._history_store.load_qas(session_id):
+        compressed = self._compressor.compress(self._history_store.load_qas(session_id))
+        self.last_compression_report = compressed.report
+
+        for record in compressed.records:
             messages.append({"role": "user", "content": str(record.get("question", ""))})
             rendered_answer = self._render_answer(record.get("answer", []))
             if rendered_answer:
@@ -49,6 +59,15 @@ class ContextBuilder:
             runtime_context = self._runtime_context_provider()
             if runtime_context:
                 sections.append(f"## Runtime Context\n{runtime_context}")
+
+        if self._skill_loader is not None:
+            skill_index = self._skill_loader.build_index_xml()
+            if skill_index:
+                sections.append(
+                    "## Skill Index\n"
+                    "The following skills are available. Load a full SKILL.md only when the task needs that SOP.\n"
+                    f"{skill_index}"
+                )
 
         return "\n\n".join(sections)
 
@@ -73,4 +92,3 @@ class ContextBuilder:
                     f"{event.get('content', '')}"
                 )
         return "\n".join(part for part in rendered if part)
-

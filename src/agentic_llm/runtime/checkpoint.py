@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import shutil
 from typing import Any
 
 from agentic_llm.llm.base import ToolCall
@@ -61,6 +62,12 @@ class CheckpointStore:
                     records.append(json.loads(line))
         return records
 
+    def delete_session(self, session_id: str) -> bool:
+        path = self.root / _safe_id(session_id)
+        if not path.exists():
+            return False
+        shutil.rmtree(path)
+        return True
+
     def _path(self, session_id: str, run_id: str) -> Path:
         return self.root / _safe_id(session_id) / f"{_safe_id(run_id)}.jsonl"
-

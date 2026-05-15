@@ -24,34 +24,50 @@
 
       <main class="workspace">
         <section class="panel user-view active" id="userView">
-          <div class="conversation-header">
-            <div>
-              <div class="mono-label">USER VIEW</div>
-              <h2>Agent Session</h2>
+          <div class="user-layout">
+            <aside class="session-sidebar" aria-label="Sessions">
+              <div class="session-sidebar-header">
+                <div class="mono-label">SESSIONS</div>
+                <h3>Conversations</h3>
+              </div>
+              <div class="session-list" id="sessionList"></div>
+              <label class="session-control">
+                <span>New Conversation</span>
+                <div class="session-row">
+                  <input id="sessionInput" value="demo" autocomplete="off" />
+                  <button type="button" id="openSessionButton" class="outline-button">Create</button>
+                </div>
+              </label>
+            </aside>
+
+            <div class="conversation-main">
+              <div class="conversation-header">
+                <div>
+                  <div class="mono-label">USER VIEW</div>
+                  <h2>Agent Session</h2>
+                </div>
+                <div class="current-session" id="currentSessionLabel">demo</div>
+              </div>
+
+              <div class="message-list" id="messageList" aria-live="polite">
+                <div class="empty-state">
+                  <div class="mono-label">READY</div>
+                  <p>Send a task. The request will pass through MQ, Agent Loop, DeepSeek, ToolRegistry, and persistence.</p>
+                </div>
+              </div>
+
+              <div class="prompt-strip" aria-label="Prompt shortcuts">
+                <button type="button" data-prompt="Read README.md and summarize the current runtime." class="prompt-chip">Summarize runtime</button>
+                <button type="button" data-prompt="Use grep_file to find where AgentMainLoop is implemented." class="prompt-chip">Find MainLoop</button>
+                <button type="button" data-prompt="Explain what tools are currently available." class="prompt-chip">List tools</button>
+              </div>
+
+              <form class="composer" id="chatForm">
+                <textarea id="messageInput" rows="3" placeholder="Ask the agent to inspect code, summarize files, or explain the runtime flow."></textarea>
+                <button type="submit" id="sendButton">Send</button>
+              </form>
             </div>
-            <label class="session-control">
-              <span>Session</span>
-              <input id="sessionInput" value="demo" autocomplete="off" />
-            </label>
           </div>
-
-          <div class="message-list" id="messageList" aria-live="polite">
-            <div class="empty-state">
-              <div class="mono-label">READY</div>
-              <p>Send a task. The request will pass through MQ, Agent Loop, DeepSeek, ToolRegistry, and persistence.</p>
-            </div>
-          </div>
-
-          <div class="prompt-strip" aria-label="Prompt shortcuts">
-            <button type="button" data-prompt="Read README.md and summarize the current runtime." class="prompt-chip">Summarize runtime</button>
-            <button type="button" data-prompt="Use grep_file to find where AgentMainLoop is implemented." class="prompt-chip">Find MainLoop</button>
-            <button type="button" data-prompt="Explain what tools are currently available." class="prompt-chip">List tools</button>
-          </div>
-
-          <form class="composer" id="chatForm">
-            <textarea id="messageInput" rows="3" placeholder="Ask the agent to inspect code, summarize files, or explain the runtime flow."></textarea>
-            <button type="submit" id="sendButton">Send</button>
-          </form>
         </section>
 
         <section class="panel developer-view" id="developerView">
@@ -87,6 +103,56 @@
               <div class="tool-list" id="toolList"></div>
             </div>
 
+            <div class="dev-section context-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">CONTEXT</div>
+                  <h3>Compression</h3>
+                </div>
+              </div>
+              <dl class="status-grid" id="contextGrid"></dl>
+            </div>
+
+            <div class="dev-section skills-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">SOP</div>
+                  <h3>Skills</h3>
+                </div>
+              </div>
+              <div class="tool-list" id="skillList"></div>
+            </div>
+
+            <div class="dev-section memory-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">MEMORY</div>
+                  <h3>Markdown Stores</h3>
+                </div>
+              </div>
+              <div class="tool-list" id="memoryList"></div>
+            </div>
+
+            <div class="dev-section cron-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">SCHEDULER</div>
+                  <h3>Cron Jobs</h3>
+                </div>
+              </div>
+              <div class="tool-list" id="cronList"></div>
+            </div>
+
+            <div class="dev-section subagent-section">
+              <div class="section-header compact">
+                <div>
+                  <div class="mono-label">BACKGROUND</div>
+                  <h3>SubAgents</h3>
+                </div>
+              </div>
+              <div class="tool-list" id="subagentList"></div>
+            </div>
+
             <div class="dev-section event-section">
               <div class="section-header compact">
                 <div>
@@ -104,4 +170,3 @@
     <script src="/static/app.js"></script>
   </body>
 </html>
-

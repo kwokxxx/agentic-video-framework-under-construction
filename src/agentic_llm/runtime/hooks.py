@@ -13,6 +13,7 @@ class AgentHookContext:
     run_id: str
     iteration: int
     messages: list[dict[str, Any]]
+    tool_calls: list[Any] = field(default_factory=list)
     tool_executions: list[Any] = field(default_factory=list)
 
 
@@ -32,6 +33,9 @@ class AgentHook:
         pass
 
     async def after_execute_tools(self, context: AgentHookContext) -> None:
+        pass
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
         pass
 
     def finalize_content(
@@ -79,6 +83,13 @@ class CompositeHook(AgentHook):
             except Exception:
                 logger.exception("AgentHook.after_execute_tools error in %s", type(hook).__name__)
 
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        for hook in self._hooks:
+            try:
+                await hook.before_execute_tools(context)
+            except Exception:
+                logger.exception("AgentHook.before_execute_tools error in %s", type(hook).__name__)
+
     def finalize_content(
         self,
         context: AgentHookContext,
@@ -87,4 +98,3 @@ class CompositeHook(AgentHook):
         for hook in self._hooks:
             content = hook.finalize_content(context, content)
         return content
-

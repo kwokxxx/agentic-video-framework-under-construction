@@ -34,14 +34,22 @@ class AgentMainLoop:
         inbound = await self._queue.consume_inbound()
         partition = self._router.route(inbound.session_id)
         try:
+            user_prompt = inbound.content
+            if inbound.source != "user":
+                user_prompt = f"[{inbound.source}]\n{inbound.content}"
             result = await self._agent.run(
                 session_id=inbound.session_id,
-                user_prompt=inbound.content,
+                user_prompt=user_prompt,
             )
             outbound = OutboundMessage(
                 session_id=inbound.session_id,
                 content=result.content or "",
                 correlation_id=inbound.message_id,
+                metadata={
+                    "inbound_source": inbound.source,
+                    "inbound_metadata": inbound.metadata,
+                    "run_id": result.run_id,
+                },
             )
             await self._queue.publish_outbound(outbound)
             return ProcessedMessage(
@@ -52,4 +60,3 @@ class AgentMainLoop:
             )
         finally:
             self._queue.acknowledge_inbound()
-

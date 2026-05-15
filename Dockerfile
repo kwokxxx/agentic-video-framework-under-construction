@@ -6,6 +6,7 @@ ENV PYTHONUNBUFFERED=1
 
 COPY pyproject.toml README.md AGENT.md USER.md TOOLS.md ./
 COPY src ./src
+COPY skills ./skills
 
 RUN python -m pip install --no-cache-dir -e .
 

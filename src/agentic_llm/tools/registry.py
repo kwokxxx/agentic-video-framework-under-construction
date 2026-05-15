@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import time
 from typing import Any
 
 from agentic_llm.llm.base import ToolCall
@@ -12,6 +13,7 @@ from agentic_llm.tools.base import BaseTool, ToolResult
 class ToolExecution:
     tool_call: ToolCall
     result: ToolResult
+    duration_ms: int = 0
 
 
 class ToolRegistry:
@@ -65,6 +67,7 @@ class ToolRegistry:
         return batches
 
     async def _execute_one(self, tool_call: ToolCall) -> ToolExecution:
+        started = time.perf_counter()
         if tool_call.parse_error:
             return ToolExecution(
                 tool_call=tool_call,
@@ -73,6 +76,7 @@ class ToolRegistry:
                     status="error",
                     content=f"Invalid tool arguments JSON: {tool_call.parse_error}",
                 ),
+                duration_ms=_elapsed_ms(started),
             )
 
         tool = self._tools.get(tool_call.name)
@@ -84,6 +88,7 @@ class ToolRegistry:
                     status="error",
                     content=f"Unknown tool: {tool_call.name}",
                 ),
+                duration_ms=_elapsed_ms(started),
             )
 
         try:
@@ -94,5 +99,12 @@ class ToolRegistry:
                 status="error",
                 content=f"{type(exc).__name__}: {exc}",
             )
-        return ToolExecution(tool_call=tool_call, result=result)
+        return ToolExecution(
+            tool_call=tool_call,
+            result=result,
+            duration_ms=_elapsed_ms(started),
+        )
 
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)

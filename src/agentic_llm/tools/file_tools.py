@@ -114,3 +114,99 @@ class GrepFileTool(WorkspaceFileTool):
             },
         )
 
+
+class WriteFileTool(WorkspaceFileTool):
+    name = "write_file"
+    description = "Write a complete text file inside the workspace."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Workspace-relative path to write.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Full file content to write.",
+            },
+        },
+        "required": ["path", "content"],
+    }
+
+    @property
+    def exclusive(self) -> bool:
+        return True
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        path = self._resolve_path(arguments.get("path"))
+        content = arguments.get("content")
+        if not isinstance(content, str):
+            raise ValueError("content must be a string")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return ToolResult(
+            tool_name=self.name,
+            content=f"Wrote {len(content)} characters to {path}.",
+            metadata={
+                "path": str(path),
+                "chars": len(content),
+            },
+        )
+
+
+class EditFileTool(WorkspaceFileTool):
+    name = "edit_file"
+    description = "Edit a workspace text file by replacing an exact old string with a new string."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Workspace-relative path to edit.",
+            },
+            "old": {
+                "type": "string",
+                "description": "Exact text to replace.",
+            },
+            "new": {
+                "type": "string",
+                "description": "Replacement text.",
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace all occurrences instead of only the first occurrence.",
+            },
+        },
+        "required": ["path", "old", "new"],
+    }
+
+    @property
+    def exclusive(self) -> bool:
+        return True
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        path = self._resolve_path(arguments.get("path"))
+        old = arguments.get("old")
+        new = arguments.get("new")
+        if not isinstance(old, str) or not old:
+            raise ValueError("old must be a non-empty string")
+        if not isinstance(new, str):
+            raise ValueError("new must be a string")
+
+        content = path.read_text(encoding="utf-8")
+        count = content.count(old)
+        if count == 0:
+            raise ValueError("old text was not found")
+
+        replace_all = bool(arguments.get("replace_all"))
+        updated = content.replace(old, new) if replace_all else content.replace(old, new, 1)
+        path.write_text(updated, encoding="utf-8")
+        replacements = count if replace_all else 1
+        return ToolResult(
+            tool_name=self.name,
+            content=f"Edited {path}; replacements={replacements}.",
+            metadata={
+                "path": str(path),
+                "replacements": replacements,
+            },
+        )

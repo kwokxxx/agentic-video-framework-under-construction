@@ -74,6 +74,27 @@ class TraceRecorderHook(AgentHook):
     def __init__(self, recorder: TraceRecorder) -> None:
         self._recorder = recorder
 
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        tools = [
+            {
+                "id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": self._safe_mapping(tool_call.arguments),
+            }
+            for tool_call in context.tool_calls
+        ]
+        self._recorder.record(
+            event_type="tool.call",
+            title="Tools requested",
+            detail=f"{len(tools)} tool call(s) requested.",
+            session_id=context.session_id,
+            run_id=context.run_id,
+            metadata={
+                "iteration": context.iteration,
+                "tools": tools,
+            },
+        )
+
     async def before_iteration(self, context: AgentHookContext) -> None:
         self._recorder.record(
             event_type="agent.iteration",
@@ -108,9 +129,12 @@ class TraceRecorderHook(AgentHook):
     async def after_execute_tools(self, context: AgentHookContext) -> None:
         tools = [
             {
+                "id": execution.tool_call.id,
                 "name": execution.tool_call.name,
                 "status": execution.result.status,
-                "content_preview": execution.result.content[:240],
+                "duration_ms": execution.duration_ms,
+                "content_chars": len(execution.result.content or ""),
+                "metadata": self._safe_mapping(execution.result.metadata),
             }
             for execution in context.tool_executions
         ]
@@ -125,6 +149,28 @@ class TraceRecorderHook(AgentHook):
                 "tools": tools,
             },
         )
+
+    def _safe_mapping(self, values: dict[str, Any]) -> dict[str, Any]:
+        safe_keys = {
+            "action",
+            "chars",
+            "kind",
+            "matches",
+            "max_chars",
+            "max_matches",
+            "name",
+            "path",
+            "pattern",
+            "replacements",
+            "status",
+            "truncated",
+            "url",
+        }
+        return {
+            str(key): value
+            for key, value in values.items()
+            if str(key) in safe_keys
+        }
 
     def finalize_content(
         self,
@@ -143,4 +189,3 @@ class TraceRecorderHook(AgentHook):
             },
         )
         return content
-
