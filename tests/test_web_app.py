@@ -176,6 +176,39 @@ class WebAppStateTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(delete_result["deleted"])
             self.assertFalse((root / attachments[0]["path"]).exists())
 
+    async def test_folder_upload_preserves_relative_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=True):
+                with patch("agentic_llm.web.app.DeepSeekProvider", FakeProvider):
+                    app = WebAppState(root)
+                    attachments = app.save_uploads(
+                        session_id="demo",
+                        files=[
+                            {
+                                "filename": "clip.txt",
+                                "relative_path": "project/assets/clip.txt",
+                                "content": b"clip",
+                                "mime_type": "text/plain",
+                            },
+                            {
+                                "filename": "shot.png",
+                                "relative_path": "project/frames/shot.png",
+                                "content": b"\x89PNG\r\n\x1a\n",
+                                "mime_type": "image/png",
+                            },
+                        ],
+                    )
+
+            names = {attachment["name"] for attachment in attachments}
+            self.assertEqual(
+                names,
+                {"project/assets/clip.txt", "project/frames/shot.png"},
+            )
+            for attachment in attachments:
+                self.assertTrue((root / attachment["path"]).exists())
+                self.assertIn("/project/", attachment["path"])
+
     async def test_session_history_renders_tool_hooks_as_system_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

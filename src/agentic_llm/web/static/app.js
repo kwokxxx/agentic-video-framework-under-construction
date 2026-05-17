@@ -28,7 +28,9 @@ const els = {
   addAttachmentButton: document.querySelector("#addAttachmentButton"),
   attachmentMenu: document.querySelector("#attachmentMenu"),
   addFileButton: document.querySelector("#addFileButton"),
+  addFolderButton: document.querySelector("#addFolderButton"),
   fileInput: document.querySelector("#fileInput"),
+  folderInput: document.querySelector("#folderInput"),
   attachmentList: document.querySelector("#attachmentList"),
   sessionInput: document.querySelector("#sessionInput"),
   openSessionButton: document.querySelector("#openSessionButton"),
@@ -298,7 +300,12 @@ async function uploadFiles(fileList) {
   }
 
   const formData = new FormData();
+  const manifest = files.map((file) => ({
+    filename: file.name,
+    relative_path: file.webkitRelativePath || file.name,
+  }));
   formData.append("session_id", getSessionId());
+  formData.append("manifest", JSON.stringify(manifest));
   files.forEach((file) => formData.append("files", file, file.name));
   setAttachmentMenuOpen(false);
   setUploading(true);
@@ -445,6 +452,7 @@ function updateComposerState() {
   els.sendButton.disabled = disabled;
   els.addAttachmentButton.disabled = disabled;
   els.addFileButton.disabled = disabled;
+  els.addFolderButton.disabled = disabled;
   if (disabled) {
     setAttachmentMenuOpen(false);
   }
@@ -803,9 +811,19 @@ els.addFileButton.addEventListener("click", () => {
   els.fileInput.click();
 });
 
+els.addFolderButton.addEventListener("click", () => {
+  setAttachmentMenuOpen(false);
+  els.folderInput.click();
+});
+
 els.fileInput.addEventListener("change", () => {
   uploadFiles(els.fileInput.files);
   els.fileInput.value = "";
+});
+
+els.folderInput.addEventListener("change", () => {
+  uploadFiles(els.folderInput.files);
+  els.folderInput.value = "";
 });
 
 document.addEventListener("click", (event) => {

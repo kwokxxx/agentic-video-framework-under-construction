@@ -464,7 +464,7 @@ h3 {
   left: 0;
   bottom: calc(100% + 8px);
   z-index: 10;
-  min-width: 168px;
+  min-width: 190px;
   padding: 6px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);

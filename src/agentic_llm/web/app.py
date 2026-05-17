@@ -72,6 +72,31 @@ def _unique_upload_path(upload_dir: Path, upload_id: str, filename: str) -> Path
     return candidate
 
 
+def _unique_target_path(target: Path) -> Path:
+    if not target.exists():
+        return target
+    suffix = target.suffix
+    stem = target.stem
+    counter = 1
+    while True:
+        candidate = target.with_name(f"{stem}_{counter}{suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _safe_relative_upload_parts(relative_path: object, fallback_filename: str) -> list[str]:
+    raw_path = str(relative_path or "").replace("\\", "/")
+    parts = [
+        _safe_path_part(part)
+        for part in raw_path.split("/")
+        if part and part not in {".", ".."}
+    ]
+    if not parts:
+        parts = [_safe_path_part(fallback_filename)]
+    return parts[:30]
+
+
 def _upload_mime_type(filename: str, raw_mime_type: object) -> str:
     suffix_types = {
         ".csv": "text/csv",
@@ -93,6 +118,16 @@ def _upload_mime_type(filename: str, raw_mime_type: object) -> str:
     if not mime_type or mime_type == "application/octet-stream":
         return guessed or "application/octet-stream"
     return mime_type
+
+
+def _parse_upload_manifest(data: bytes) -> list[dict[str, Any]]:
+    try:
+        parsed = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
 
 
 class SessionLockManager:
@@ -213,6 +248,7 @@ class WebAppState:
         session_id = session_id.strip() or "default"
         upload_dir = self.upload_root / _safe_path_part(session_id)
         upload_dir.mkdir(parents=True, exist_ok=True)
+        batch_id = uuid.uuid4().hex[:12]
         saved: list[dict[str, Any]] = []
         for item in files:
             filename = (
@@ -224,14 +260,25 @@ class WebAppState:
             content = item.get("content") or b""
             if not isinstance(content, bytes):
                 raise ValueError("upload content must be bytes")
-            upload_id = uuid.uuid4().hex[:12]
-            target = _unique_upload_path(upload_dir, upload_id, filename)
+            relative_parts = _safe_relative_upload_parts(
+                item.get("relative_path"),
+                filename,
+            )
+            has_directory = len(relative_parts) > 1
+            if has_directory:
+                target = _unique_target_path(upload_dir / batch_id / Path(*relative_parts))
+                display_name = "/".join(relative_parts)
+            else:
+                upload_id = uuid.uuid4().hex[:12]
+                target = _unique_upload_path(upload_dir, upload_id, filename)
+                display_name = filename
+            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
             mime_type = _upload_mime_type(filename, item.get("mime_type"))
             saved.append(
                 {
-                    "id": target.stem,
-                    "name": filename,
+                    "id": target.relative_to(upload_dir).as_posix(),
+                    "name": display_name,
                     "path": str(target.relative_to(self.workspace_root)),
                     "mime_type": mime_type,
                     "size_bytes": len(content),
@@ -780,6 +827,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("multipart upload is required")
 
         session_id = "default"
+        manifest: list[dict[str, Any]] = []
         files: list[dict[str, Any]] = []
         for part in message.iter_parts():
             if part.get_content_disposition() != "form-data":
@@ -796,6 +844,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     or "default"
                 )
                 continue
+            if name == "manifest":
+                manifest = _parse_upload_manifest(data)
+                continue
             if name == "files" and filename:
                 files.append(
                     {
@@ -810,6 +861,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
         if not files:
             raise ValueError("at least one file is required")
+        for index, item in enumerate(files):
+            if index >= len(manifest):
+                continue
+            relative_path = manifest[index].get("relative_path")
+            if isinstance(relative_path, str):
+                item["relative_path"] = relative_path
         return session_id, files
 
     def _serve_static(self, relative_path: str) -> None:

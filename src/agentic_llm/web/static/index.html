@@ -67,8 +67,10 @@
                   <button type="button" id="addAttachmentButton" class="attachment-button" aria-label="Add attachments" aria-expanded="false" aria-controls="attachmentMenu" title="Add attachments">+</button>
                   <div class="attachment-menu" id="attachmentMenu" hidden>
                     <button type="button" id="addFileButton" class="attachment-menu-item">Add photos and files</button>
+                    <button type="button" id="addFolderButton" class="attachment-menu-item">Add folder</button>
                   </div>
                   <input id="fileInput" type="file" multiple hidden />
+                  <input id="folderInput" type="file" webkitdirectory directory multiple hidden />
                 </div>
                 <div class="composer-main">
                   <div class="attachment-list" id="attachmentList"></div>
