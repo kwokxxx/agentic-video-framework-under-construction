@@ -64,9 +64,10 @@
 
               <form class="composer" id="chatForm">
                 <div class="composer-tools" aria-label="Attachments">
-                  <button type="button" id="addPhotoButton" class="attachment-button" title="Add photo">Photo</button>
-                  <button type="button" id="addFileButton" class="attachment-button" title="Add file">File</button>
-                  <input id="photoInput" type="file" accept="image/*" multiple hidden />
+                  <button type="button" id="addAttachmentButton" class="attachment-button" aria-label="Add attachments" aria-expanded="false" aria-controls="attachmentMenu" title="Add attachments">+</button>
+                  <div class="attachment-menu" id="attachmentMenu" hidden>
+                    <button type="button" id="addFileButton" class="attachment-menu-item">Add photos and files</button>
+                  </div>
                   <input id="fileInput" type="file" multiple hidden />
                 </div>
                 <div class="composer-main">

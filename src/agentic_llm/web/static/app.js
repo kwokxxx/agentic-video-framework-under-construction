@@ -25,9 +25,9 @@ const els = {
   chatForm: document.querySelector("#chatForm"),
   messageInput: document.querySelector("#messageInput"),
   sendButton: document.querySelector("#sendButton"),
-  addPhotoButton: document.querySelector("#addPhotoButton"),
+  addAttachmentButton: document.querySelector("#addAttachmentButton"),
+  attachmentMenu: document.querySelector("#attachmentMenu"),
   addFileButton: document.querySelector("#addFileButton"),
-  photoInput: document.querySelector("#photoInput"),
   fileInput: document.querySelector("#fileInput"),
   attachmentList: document.querySelector("#attachmentList"),
   sessionInput: document.querySelector("#sessionInput"),
@@ -279,6 +279,18 @@ function removeAttachment(attachmentId) {
   renderAttachmentList();
 }
 
+function setAttachmentMenuOpen(open) {
+  els.attachmentMenu.hidden = !open;
+  els.addAttachmentButton.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleAttachmentMenu() {
+  if (state.busy || state.uploading) {
+    return;
+  }
+  setAttachmentMenuOpen(els.attachmentMenu.hidden);
+}
+
 async function uploadFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) {
@@ -288,6 +300,7 @@ async function uploadFiles(fileList) {
   const formData = new FormData();
   formData.append("session_id", getSessionId());
   files.forEach((file) => formData.append("files", file, file.name));
+  setAttachmentMenuOpen(false);
   setUploading(true);
 
   try {
@@ -430,8 +443,11 @@ function setUploading(uploading) {
 function updateComposerState() {
   const disabled = state.busy || state.uploading;
   els.sendButton.disabled = disabled;
-  els.addPhotoButton.disabled = disabled;
+  els.addAttachmentButton.disabled = disabled;
   els.addFileButton.disabled = disabled;
+  if (disabled) {
+    setAttachmentMenuOpen(false);
+  }
   els.chatForm.classList.toggle("is-busy", state.busy);
   els.chatForm.classList.toggle("is-uploading", state.uploading);
   els.sendButton.textContent = state.busy
@@ -778,22 +794,31 @@ els.chatForm.addEventListener("submit", (event) => {
   sendMessage(message);
 });
 
-els.addPhotoButton.addEventListener("click", () => {
-  els.photoInput.click();
+els.addAttachmentButton.addEventListener("click", () => {
+  toggleAttachmentMenu();
 });
 
 els.addFileButton.addEventListener("click", () => {
+  setAttachmentMenuOpen(false);
   els.fileInput.click();
-});
-
-els.photoInput.addEventListener("change", () => {
-  uploadFiles(els.photoInput.files);
-  els.photoInput.value = "";
 });
 
 els.fileInput.addEventListener("change", () => {
   uploadFiles(els.fileInput.files);
   els.fileInput.value = "";
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest(".composer-tools")) {
+    return;
+  }
+  setAttachmentMenuOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    setAttachmentMenuOpen(false);
+  }
 });
 
 els.attachmentList.addEventListener("click", (event) => {

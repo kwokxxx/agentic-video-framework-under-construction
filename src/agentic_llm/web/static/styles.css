@@ -416,6 +416,7 @@ h3 {
 }
 
 .composer-tools {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -443,16 +444,53 @@ h3 {
 }
 
 .composer .attachment-button {
-  min-width: 72px;
-  min-height: 42px;
-  padding: 10px 12px;
+  width: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
   border-color: var(--hairline);
   background: var(--canvas);
   color: var(--ink);
+  font-size: 24px;
+  line-height: 1;
 }
 
 .composer .attachment-button:hover {
   border-color: var(--ink);
+}
+
+.attachment-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-card);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 40%);
+}
+
+.attachment-menu[hidden] {
+  display: none;
+}
+
+.composer .attachment-menu-item {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.composer .attachment-menu-item:hover {
+  background: var(--hairline);
 }
 
 .attachment-list {
@@ -661,11 +699,12 @@ h3 {
   }
 
   .composer-tools {
-    justify-content: stretch;
+    justify-content: flex-start;
   }
 
   .composer .attachment-button {
-    flex: 1;
+    width: 48px;
+    flex: 0 0 48px;
   }
 
   .developer-grid {
