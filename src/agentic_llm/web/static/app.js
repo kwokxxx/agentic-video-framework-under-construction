@@ -10,6 +10,8 @@ const state = {
   sessions: [],
   currentSession: readStoredSessionId() || "demo",
   busy: false,
+  uploading: false,
+  attachments: [],
   seenMessages: new Set(),
   seenLiveHooks: new Set(),
   liveTraceTimer: null,
@@ -23,6 +25,11 @@ const els = {
   chatForm: document.querySelector("#chatForm"),
   messageInput: document.querySelector("#messageInput"),
   sendButton: document.querySelector("#sendButton"),
+  addPhotoButton: document.querySelector("#addPhotoButton"),
+  addFileButton: document.querySelector("#addFileButton"),
+  photoInput: document.querySelector("#photoInput"),
+  fileInput: document.querySelector("#fileInput"),
+  attachmentList: document.querySelector("#attachmentList"),
   sessionInput: document.querySelector("#sessionInput"),
   openSessionButton: document.querySelector("#openSessionButton"),
   sessionList: document.querySelector("#sessionList"),
@@ -119,10 +126,14 @@ async function setSessionId(sessionId, { loadHistory = true, saveDraft = true } 
   if (saveDraft) {
     saveCurrentDraft();
   }
+  const previous = normalizeSessionId(state.currentSession);
   const normalized = normalizeSessionId(sessionId);
   state.currentSession = normalized;
   els.currentSessionLabel.textContent = normalized;
   persistSessionId(normalized);
+  if (normalized !== previous) {
+    clearAttachments();
+  }
   renderSessionOptions();
   if (loadHistory) {
     await loadSessionHistory(normalized);
@@ -243,6 +254,89 @@ function addMessage(role, content) {
   return node;
 }
 
+function renderAttachmentList() {
+  els.attachmentList.innerHTML = state.attachments
+    .map((attachment) => {
+      const label = `${attachment.name || "file"} (${formatFileSize(attachment.size_bytes)})`;
+      const removeLabel = `Remove ${attachment.name || "file"}`;
+      return `<div class="attachment-chip" data-attachment="${escapeHtml(attachment.id)}">
+        <span title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+        <button type="button" class="attachment-remove" data-attachment="${escapeHtml(attachment.id)}" aria-label="${escapeHtml(removeLabel)}">x</button>
+      </div>`;
+    })
+    .join("");
+}
+
+function clearAttachments() {
+  state.attachments = [];
+  renderAttachmentList();
+}
+
+function removeAttachment(attachmentId) {
+  state.attachments = state.attachments.filter(
+    (attachment) => attachment.id !== attachmentId
+  );
+  renderAttachmentList();
+}
+
+async function uploadFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) {
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("session_id", getSessionId());
+  files.forEach((file) => formData.append("files", file, file.name));
+  setUploading(true);
+
+  try {
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Upload failed");
+    }
+    state.attachments = [...state.attachments, ...(payload.attachments || [])];
+    renderAttachmentList();
+  } catch (error) {
+    addMessage("system", `ERROR: ${error.message}`);
+  } finally {
+    setUploading(false);
+  }
+}
+
+function formatComposerUserMessage(message, attachments) {
+  const lines = [];
+  if (message) {
+    lines.push(message);
+  }
+  if (attachments.length) {
+    lines.push(
+      `Attached: ${attachments
+        .map(
+          (attachment) =>
+            `${attachment.name || "file"} (${formatFileSize(attachment.size_bytes)})`
+        )
+        .join(", ")}`
+    );
+  }
+  return lines.join("\n\n") || "Attached file(s)";
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function startLiveTracePolling() {
   stopLiveTracePolling();
   refreshTrace();
@@ -301,6 +395,7 @@ function formatSafeToolDetails(values) {
     "chars",
     "content_chars",
     "duration_ms",
+    "height",
     "kind",
     "matches",
     "max_chars",
@@ -309,9 +404,12 @@ function formatSafeToolDetails(values) {
     "path",
     "pattern",
     "replacements",
+    "mime_type",
+    "size_bytes",
     "status",
     "truncated",
     "url",
+    "width",
   ];
   return safeKeys
     .filter((key) => values[key] !== undefined && values[key] !== null && values[key] !== "")
@@ -321,15 +419,33 @@ function formatSafeToolDetails(values) {
 
 function setBusy(busy) {
   state.busy = busy;
-  els.sendButton.disabled = busy;
-  els.chatForm.classList.toggle("is-busy", busy);
-  els.sendButton.textContent = busy ? "Running" : "Send";
+  updateComposerState();
+}
+
+function setUploading(uploading) {
+  state.uploading = uploading;
+  updateComposerState();
+}
+
+function updateComposerState() {
+  const disabled = state.busy || state.uploading;
+  els.sendButton.disabled = disabled;
+  els.addPhotoButton.disabled = disabled;
+  els.addFileButton.disabled = disabled;
+  els.chatForm.classList.toggle("is-busy", state.busy);
+  els.chatForm.classList.toggle("is-uploading", state.uploading);
+  els.sendButton.textContent = state.busy
+    ? "Running"
+    : state.uploading
+      ? "Uploading"
+      : "Send";
 }
 
 async function sendMessage(message) {
   const sessionId = getSessionId();
+  const attachments = state.attachments.slice();
   await setSessionId(sessionId, { loadHistory: false, saveDraft: false });
-  addMessage("user", message);
+  addMessage("user", formatComposerUserMessage(message, attachments));
   const pending = addMessage("system", "MQ INBOUND -> AGENT LOOP");
   setBusy(true);
   state.seenLiveHooks = new Set();
@@ -339,7 +455,7 @@ async function sendMessage(message) {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message }),
+      body: JSON.stringify({ session_id: sessionId, message, attachments }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -350,6 +466,7 @@ async function sendMessage(message) {
     pending.remove();
     state.seenMessages.add(payload.message.id);
     state.trace = payload.trace || state.trace;
+    clearAttachments();
     await loadSessions();
     await loadSessionHistory(sessionId);
     await loadStatus();
@@ -653,12 +770,38 @@ els.viewTabs.forEach((tab) => {
 els.chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const message = els.messageInput.value.trim();
-  if (!message || state.busy) {
+  if ((!message && !state.attachments.length) || state.busy || state.uploading) {
     return;
   }
   els.messageInput.value = "";
   clearDraftForSession(state.currentSession);
   sendMessage(message);
+});
+
+els.addPhotoButton.addEventListener("click", () => {
+  els.photoInput.click();
+});
+
+els.addFileButton.addEventListener("click", () => {
+  els.fileInput.click();
+});
+
+els.photoInput.addEventListener("change", () => {
+  uploadFiles(els.photoInput.files);
+  els.photoInput.value = "";
+});
+
+els.fileInput.addEventListener("change", () => {
+  uploadFiles(els.fileInput.files);
+  els.fileInput.value = "";
+});
+
+els.attachmentList.addEventListener("click", (event) => {
+  const removeButton = event.target.closest(".attachment-remove");
+  if (!removeButton) {
+    return;
+  }
+  removeAttachment(removeButton.dataset.attachment);
 });
 
 els.messageInput.addEventListener("keydown", (event) => {

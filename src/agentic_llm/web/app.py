@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from email.parser import BytesParser
+from email.policy import default
 import json
 import mimetypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import re
+import shutil
 import threading
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+import uuid
 
 from agentic_llm.agent_loop import AgentOnceRun
 from agentic_llm.config import DeepSeekSettings
@@ -26,6 +31,7 @@ from agentic_llm.tools import (
     EditFileTool,
     FetchUrlTool,
     GrepFileTool,
+    InspectFileTool,
     ReadFileTool,
     ReadSkillTool,
     RewriteMemoryTool,
@@ -35,6 +41,58 @@ from agentic_llm.tools import (
     WriteFileTool,
 )
 from agentic_llm.web.tracing import TraceRecorder, TraceRecorderHook
+
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+ATTACHMENT_CONTEXT_MARKER = (
+    "Attached files are available in the workspace. "
+    "Use inspect_file for non-text files and images; use read_file only for text files."
+)
+
+
+def _safe_path_part(value: object) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"[^a-zA-Z0-9_.-]+", "_", text)
+    return text.strip("._")[:80] or "upload"
+
+
+def _unique_upload_path(upload_dir: Path, upload_id: str, filename: str) -> Path:
+    original = Path(filename)
+    stem = _safe_path_part(original.stem or "file")
+    suffix = (
+        original.suffix
+        if re.fullmatch(r"\.[A-Za-z0-9]{1,12}", original.suffix)
+        else ""
+    )
+    candidate = upload_dir / f"{upload_id}_{stem}{suffix}"
+    counter = 1
+    while candidate.exists():
+        candidate = upload_dir / f"{upload_id}_{stem}_{counter}{suffix}"
+        counter += 1
+    return candidate
+
+
+def _upload_mime_type(filename: str, raw_mime_type: object) -> str:
+    suffix_types = {
+        ".csv": "text/csv",
+        ".json": "application/json",
+        ".log": "text/plain",
+        ".md": "text/markdown",
+        ".py": "text/x-python",
+        ".toml": "application/toml",
+        ".tsv": "text/tab-separated-values",
+        ".txt": "text/plain",
+        ".xml": "application/xml",
+        ".yaml": "application/yaml",
+        ".yml": "application/yaml",
+    }
+    guessed = mimetypes.guess_type(filename)[0] or suffix_types.get(
+        Path(filename).suffix.lower()
+    )
+    mime_type = str(raw_mime_type or "").strip()
+    if not mime_type or mime_type == "application/octet-stream":
+        return guessed or "application/octet-stream"
+    return mime_type
 
 
 class SessionLockManager:
@@ -53,6 +111,7 @@ class WebAppState:
     def __init__(self, workspace_root: Path) -> None:
         self.workspace_root = workspace_root.resolve()
         self.state_root = self.workspace_root / ".agentic_llm"
+        self.upload_root = self.state_root / "uploads"
         self.history_store = JsonlHistoryStore(self.state_root / "history")
         self.checkpoint_store = CheckpointStore(self.state_root / "checkpoints")
         self.skill_loader = SkillLoader(workspace_root=self.workspace_root)
@@ -86,6 +145,7 @@ class WebAppState:
         )
         tools = [
             ReadFileTool(self.workspace_root),
+            InspectFileTool(self.workspace_root),
             GrepFileTool(self.workspace_root),
             WriteFileTool(self.workspace_root),
             EditFileTool(self.workspace_root),
@@ -114,8 +174,15 @@ class WebAppState:
     async def handle_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         session_id = str(payload.get("session_id") or "default").strip() or "default"
         content = str(payload.get("message") or "").strip()
+        attachments = self._normalize_attachments(payload.get("attachments"), session_id)
         if not content:
-            raise ValueError("message is required")
+            if attachments:
+                content = "Please inspect the attached file(s)."
+            else:
+                raise ValueError("message is required")
+
+        if attachments:
+            content = self._append_attachment_context(content, attachments)
 
         lock = self.locks.get(session_id)
         with lock:
@@ -123,8 +190,107 @@ class WebAppState:
                 session_id,
                 content,
                 source="user",
-                metadata={},
+                metadata={
+                    "attachments": [
+                        {
+                            "id": attachment["id"],
+                            "name": attachment["name"],
+                            "path": attachment["path"],
+                            "mime_type": attachment["mime_type"],
+                            "size_bytes": attachment["size_bytes"],
+                        }
+                        for attachment in attachments
+                    ]
+                },
             )
+
+    def save_uploads(
+        self,
+        *,
+        session_id: str,
+        files: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        session_id = session_id.strip() or "default"
+        upload_dir = self.upload_root / _safe_path_part(session_id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        saved: list[dict[str, Any]] = []
+        for item in files:
+            filename = (
+                str(item.get("filename") or "upload.bin")
+                .replace("\\", "/")
+                .split("/")[-1]
+                or "upload.bin"
+            )
+            content = item.get("content") or b""
+            if not isinstance(content, bytes):
+                raise ValueError("upload content must be bytes")
+            upload_id = uuid.uuid4().hex[:12]
+            target = _unique_upload_path(upload_dir, upload_id, filename)
+            target.write_bytes(content)
+            mime_type = _upload_mime_type(filename, item.get("mime_type"))
+            saved.append(
+                {
+                    "id": target.stem,
+                    "name": filename,
+                    "path": str(target.relative_to(self.workspace_root)),
+                    "mime_type": mime_type,
+                    "size_bytes": len(content),
+                }
+            )
+        return saved
+
+    def _normalize_attachments(
+        self,
+        raw_attachments: object,
+        session_id: str,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw_attachments, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        upload_root = (self.upload_root / _safe_path_part(session_id)).resolve()
+        for item in raw_attachments:
+            if not isinstance(item, dict):
+                continue
+            path_value = item.get("path")
+            if not isinstance(path_value, str) or not path_value:
+                continue
+            path = (self.workspace_root / path_value).resolve()
+            if (
+                not path.exists()
+                or not path.is_file()
+                or not path.is_relative_to(upload_root)
+            ):
+                continue
+            normalized.append(
+                {
+                    "id": str(item.get("id") or path.stem),
+                    "name": str(item.get("name") or path.name),
+                    "path": str(path.relative_to(self.workspace_root)),
+                    "mime_type": _upload_mime_type(path.name, item.get("mime_type")),
+                    "size_bytes": int(item.get("size_bytes") or path.stat().st_size),
+                }
+            )
+        return normalized
+
+    def _append_attachment_context(
+        self,
+        content: str,
+        attachments: list[dict[str, Any]],
+    ) -> str:
+        lines = [
+            content,
+            "",
+            ATTACHMENT_CONTEXT_MARKER,
+        ]
+        for index, attachment in enumerate(attachments, 1):
+            lines.append(
+                (
+                    f"{index}. {attachment['name']} | path={attachment['path']} | "
+                    f"mime={attachment['mime_type']} | size_bytes={attachment['size_bytes']}"
+                )
+            )
+        return "\n".join(lines)
 
     async def _handle_chat_locked(
         self,
@@ -269,6 +435,10 @@ class WebAppState:
     def delete_session(self, session_id: str) -> dict[str, Any]:
         deleted_history = self.history_store.delete_session(session_id)
         deleted_checkpoints = self.checkpoint_store.delete_session(session_id)
+        upload_dir = self.upload_root / _safe_path_part(session_id)
+        deleted_uploads = upload_dir.exists()
+        if deleted_uploads:
+            shutil.rmtree(upload_dir)
         with self.background_messages_lock:
             self.background_messages = [
                 message
@@ -277,7 +447,7 @@ class WebAppState:
             ]
         return {
             "session_id": session_id,
-            "deleted": deleted_history or deleted_checkpoints,
+            "deleted": deleted_history or deleted_checkpoints or deleted_uploads,
         }
 
     def session_history(self, session_id: str) -> dict[str, Any]:
@@ -292,7 +462,7 @@ class WebAppState:
                         "id": f"{run_id}:user",
                         "session_id": session_id,
                         "role": "user",
-                        "content": question,
+                        "content": self._render_user_history_question(question),
                         "created_at_ms": created_at_ms,
                     }
                 )
@@ -325,6 +495,23 @@ class WebAppState:
                     }
                 )
         return {"session_id": session_id, "messages": messages}
+
+    def _render_user_history_question(self, question: str) -> str:
+        marker = f"\n\n{ATTACHMENT_CONTEXT_MARKER}"
+        if marker not in question:
+            return question
+
+        visible, attachment_context = question.split(marker, 1)
+        names: list[str] = []
+        for raw_line in attachment_context.splitlines():
+            line = raw_line.strip()
+            if " | path=" not in line or ". " not in line:
+                continue
+            names.append(line.split(". ", 1)[1].split(" | path=", 1)[0])
+        if not names:
+            return visible
+        summary = f"Attached: {', '.join(names)}"
+        return f"{visible}\n\n{summary}" if visible else summary
 
     def _render_hook_history_message(self, event: object) -> str:
         if not isinstance(event, dict):
@@ -362,17 +549,21 @@ class WebAppState:
             "action",
             "chars",
             "content_chars",
+            "height",
             "kind",
             "matches",
             "max_chars",
             "max_matches",
+            "mime_type",
             "name",
             "path",
             "pattern",
             "replacements",
+            "size_bytes",
             "status",
             "truncated",
             "url",
+            "width",
         }
         parts: list[str] = []
         for key, value in values.items():
@@ -495,6 +686,28 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/upload":
+            try:
+                session_id, files = self._read_upload_form()
+                attachments = self.server.app_state.save_uploads(
+                    session_id=session_id,
+                    files=files,
+                )
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:
+                self.server.app_state.trace.record(
+                    event_type="server.error",
+                    title="Upload failed",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Upload failed")
+                return
+
+            self._send_json({"attachments": attachments})
+            return
+
         if parsed.path != "/api/chat":
             self._send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
@@ -541,6 +754,63 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             raise ValueError("JSON body must be an object")
         return payload
+
+    def _read_upload_form(self) -> tuple[str, list[dict[str, Any]]]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            raise ValueError("upload body is required")
+        if length > MAX_UPLOAD_BYTES:
+            raise ValueError("upload is too large")
+
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            raise ValueError("multipart/form-data is required")
+
+        body = self.rfile.read(length)
+        parser = BytesParser(policy=default)
+        message = parser.parsebytes(
+            (
+                f"Content-Type: {content_type}\r\n"
+                "MIME-Version: 1.0\r\n"
+                "\r\n"
+            ).encode("utf-8")
+            + body
+        )
+        if not message.is_multipart():
+            raise ValueError("multipart upload is required")
+
+        session_id = "default"
+        files: list[dict[str, Any]] = []
+        for part in message.iter_parts():
+            if part.get_content_disposition() != "form-data":
+                continue
+            name = part.get_param("name", header="content-disposition")
+            filename = part.get_filename()
+            data = part.get_payload(decode=True) or b""
+            if name == "session_id":
+                session_id = (
+                    data.decode(
+                        part.get_content_charset() or "utf-8",
+                        errors="replace",
+                    ).strip()
+                    or "default"
+                )
+                continue
+            if name == "files" and filename:
+                files.append(
+                    {
+                        "filename": filename,
+                        "content": data,
+                        "mime_type": _upload_mime_type(
+                            filename,
+                            part.get_content_type(),
+                        ),
+                    }
+                )
+
+        if not files:
+            raise ValueError("at least one file is required")
+        return session_id, files
 
     def _serve_static(self, relative_path: str) -> None:
         static_root = Path(__file__).parent / "static"

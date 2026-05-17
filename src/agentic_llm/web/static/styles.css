@@ -111,7 +111,8 @@ h3 {
 .view-switch,
 .outline-button,
 .prompt-chip,
-.composer button {
+.composer button,
+.attachment-chip {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-pill);
 }
@@ -409,9 +410,21 @@ h3 {
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
+}
+
+.composer-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.composer-main {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
 }
 
 .composer textarea {
@@ -427,6 +440,65 @@ h3 {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--canvas);
+}
+
+.composer .attachment-button {
+  min-width: 72px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-color: var(--hairline);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.composer .attachment-button:hover {
+  border-color: var(--ink);
+}
+
+.attachment-list {
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-list:empty {
+  display: none;
+}
+
+.attachment-chip {
+  max-width: min(360px, 100%);
+  min-height: 34px;
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  color: var(--body);
+  background: var(--canvas-soft);
+}
+
+.attachment-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-remove {
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+
+.attachment-remove:hover {
+  background: var(--hairline);
+  color: var(--ink);
 }
 
 .developer-grid {
@@ -586,6 +658,14 @@ h3 {
 
   .composer button {
     width: 100%;
+  }
+
+  .composer-tools {
+    justify-content: stretch;
+  }
+
+  .composer .attachment-button {
+    flex: 1;
   }
 
   .developer-grid {

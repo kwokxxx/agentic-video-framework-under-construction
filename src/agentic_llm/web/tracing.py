@@ -154,17 +154,21 @@ class TraceRecorderHook(AgentHook):
         safe_keys = {
             "action",
             "chars",
+            "height",
             "kind",
             "matches",
             "max_chars",
             "max_matches",
+            "mime_type",
             "name",
             "path",
             "pattern",
             "replacements",
+            "size_bytes",
             "status",
             "truncated",
             "url",
+            "width",
         }
         return {
             str(key): value

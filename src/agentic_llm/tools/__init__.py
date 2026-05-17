@@ -1,6 +1,6 @@
 from agentic_llm.tools.base import BaseTool, ToolResult
 from agentic_llm.tools.cron_tool import CronTool
-from agentic_llm.tools.file_tools import EditFileTool, GrepFileTool, ReadFileTool, WriteFileTool
+from agentic_llm.tools.file_tools import EditFileTool, GrepFileTool, InspectFileTool, ReadFileTool, WriteFileTool
 from agentic_llm.tools.memory_tools import RewriteMemoryTool
 from agentic_llm.tools.registry import ToolExecution, ToolRegistry
 from agentic_llm.tools.skill_tools import ReadSkillTool
@@ -13,6 +13,7 @@ __all__ = [
     "EditFileTool",
     "FetchUrlTool",
     "GrepFileTool",
+    "InspectFileTool",
     "ReadFileTool",
     "ReadSkillTool",
     "RewriteMemoryTool",

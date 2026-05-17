@@ -18,6 +18,7 @@ from agentic_llm.tools import (
     EditFileTool,
     FetchUrlTool,
     GrepFileTool,
+    InspectFileTool,
     ReadFileTool,
     ReadSkillTool,
     RewriteMemoryTool,
@@ -45,6 +46,7 @@ async def _run(prompt: str, session_id: str, workspace_root: Path) -> None:
         )
         tools = [
             ReadFileTool(workspace_root),
+            InspectFileTool(workspace_root),
             GrepFileTool(workspace_root),
             WriteFileTool(workspace_root),
             EditFileTool(workspace_root),

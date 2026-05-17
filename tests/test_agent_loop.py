@@ -12,7 +12,7 @@ from agentic_llm.context import ContextBuilder
 from agentic_llm.llm.base import LLMResponse, ToolCall
 from agentic_llm.runtime import CheckpointStore
 from agentic_llm.session import JsonlHistoryStore
-from agentic_llm.tools import GrepFileTool, ReadFileTool, ToolRegistry
+from agentic_llm.tools import GrepFileTool, InspectFileTool, ReadFileTool, ToolRegistry
 
 
 class FakeProvider:
@@ -77,6 +77,39 @@ class AgentLoopTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_inspect_file_returns_text_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "note.txt").write_text("alpha beta", encoding="utf-8")
+
+            result = await InspectFileTool(root).execute({"path": "note.txt"})
+
+            self.assertEqual(result.status, "success")
+            self.assertIn("Text preview:", result.content)
+            self.assertIn("alpha beta", result.content)
+            self.assertEqual(result.metadata["mime_type"], "text/plain")
+            self.assertEqual(result.metadata["size_bytes"], len("alpha beta"))
+
+    async def test_inspect_file_returns_png_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            png = (
+                b"\x89PNG\r\n\x1a\n"
+                + b"\x00\x00\x00\rIHDR"
+                + (2).to_bytes(4, "big")
+                + (3).to_bytes(4, "big")
+                + b"\x08\x02\x00\x00\x00\x00\x00\x00\x00"
+            )
+            (root / "image.png").write_bytes(png)
+
+            result = await InspectFileTool(root).execute({"path": "image.png"})
+
+            self.assertEqual(result.status, "success")
+            self.assertEqual(result.metadata["mime_type"], "image/png")
+            self.assertEqual(result.metadata["width"], 2)
+            self.assertEqual(result.metadata["height"], 3)
+            self.assertIn("Image dimensions: 2x3", result.content)
+
     async def test_grep_tool_returns_matches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -100,4 +133,3 @@ class ToolRegistryTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

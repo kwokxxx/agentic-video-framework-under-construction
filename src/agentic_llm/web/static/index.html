@@ -63,7 +63,16 @@
               </div>
 
               <form class="composer" id="chatForm">
-                <textarea id="messageInput" rows="3" placeholder="Ask the agent to inspect code, summarize files, or explain the runtime flow."></textarea>
+                <div class="composer-tools" aria-label="Attachments">
+                  <button type="button" id="addPhotoButton" class="attachment-button" title="Add photo">Photo</button>
+                  <button type="button" id="addFileButton" class="attachment-button" title="Add file">File</button>
+                  <input id="photoInput" type="file" accept="image/*" multiple hidden />
+                  <input id="fileInput" type="file" multiple hidden />
+                </div>
+                <div class="composer-main">
+                  <div class="attachment-list" id="attachmentList"></div>
+                  <textarea id="messageInput" rows="3" placeholder="Ask the agent to inspect code, summarize files, or explain the runtime flow."></textarea>
+                </div>
                 <button type="submit" id="sendButton">Send</button>
               </form>
             </div>

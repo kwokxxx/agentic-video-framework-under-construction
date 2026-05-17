@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import mimetypes
 import re
 from pathlib import Path
+import struct
 from typing import Any
 
 from agentic_llm.tools.base import BaseTool, ToolResult
@@ -115,6 +118,73 @@ class GrepFileTool(WorkspaceFileTool):
         )
 
 
+class InspectFileTool(WorkspaceFileTool):
+    name = "inspect_file"
+    description = "Inspect any workspace file, including binary files and images."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Workspace-relative path to inspect.",
+            },
+            "max_chars": {
+                "type": "integer",
+                "description": "Maximum text preview characters for text-like files.",
+            },
+        },
+        "required": ["path"],
+    }
+
+    @property
+    def read_only(self) -> bool:
+        return True
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        path = self._resolve_path(arguments.get("path"))
+        max_chars = int(arguments.get("max_chars") or 4000)
+        data = path.read_bytes()
+        mime_type = _guess_mime_type(path.name)
+        digest = hashlib.sha256(data).hexdigest()
+        dimensions = _image_dimensions(data, mime_type)
+        preview = _text_preview(path, data, mime_type, max_chars=max_chars)
+
+        metadata: dict[str, Any] = {
+            "path": str(path),
+            "mime_type": mime_type,
+            "size_bytes": len(data),
+            "sha256": digest,
+        }
+        lines = [
+            f"Path: {path}",
+            f"MIME: {mime_type}",
+            f"Size: {len(data)} bytes",
+            f"SHA256: {digest}",
+        ]
+        if dimensions is not None:
+            width, height = dimensions
+            metadata["width"] = width
+            metadata["height"] = height
+            lines.append(f"Image dimensions: {width}x{height}")
+        if preview is not None:
+            text, truncated = preview
+            metadata["truncated"] = truncated
+            lines.append("")
+            lines.append("Text preview:")
+            lines.append(text)
+            if truncated:
+                lines.append("... omitted ...")
+        else:
+            metadata["text_preview"] = False
+            lines.append("Text preview: unavailable for this file type.")
+
+        return ToolResult(
+            tool_name=self.name,
+            content="\n".join(lines),
+            metadata=metadata,
+        )
+
+
 class WriteFileTool(WorkspaceFileTool):
     name = "write_file"
     description = "Write a complete text file inside the workspace."
@@ -210,3 +280,105 @@ class EditFileTool(WorkspaceFileTool):
                 "replacements": replacements,
             },
         )
+
+
+def _text_preview(
+    path: Path,
+    data: bytes,
+    mime_type: str,
+    *,
+    max_chars: int,
+) -> tuple[str, bool] | None:
+    text_suffixes = {
+        ".csv",
+        ".json",
+        ".log",
+        ".md",
+        ".py",
+        ".toml",
+        ".tsv",
+        ".txt",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
+    if not mime_type.startswith("text/") and path.suffix.lower() not in text_suffixes:
+        return None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    truncated = len(text) > max_chars
+    return (text[:max_chars], truncated)
+
+
+def _guess_mime_type(filename: str) -> str:
+    suffix_types = {
+        ".csv": "text/csv",
+        ".json": "application/json",
+        ".log": "text/plain",
+        ".md": "text/markdown",
+        ".py": "text/x-python",
+        ".toml": "application/toml",
+        ".tsv": "text/tab-separated-values",
+        ".txt": "text/plain",
+        ".xml": "application/xml",
+        ".yaml": "application/yaml",
+        ".yml": "application/yaml",
+    }
+    return (
+        mimetypes.guess_type(filename)[0]
+        or suffix_types.get(Path(filename).suffix.lower())
+        or "application/octet-stream"
+    )
+
+
+def _image_dimensions(data: bytes, mime_type: str) -> tuple[int, int] | None:
+    if mime_type == "image/png" and len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return struct.unpack(">II", data[16:24])
+    if mime_type == "image/gif" and len(data) >= 10 and data[:6] in (b"GIF87a", b"GIF89a"):
+        return struct.unpack("<HH", data[6:10])
+    if mime_type == "image/jpeg" and len(data) >= 4 and data.startswith(b"\xff\xd8"):
+        return _jpeg_dimensions(data)
+    return None
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    index = 2
+    sof_markers = {
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
+    }
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            index += 1
+            continue
+        marker = data[index + 1]
+        index += 2
+        while marker == 0xFF and index < len(data):
+            marker = data[index]
+            index += 1
+        if marker in (0xD8, 0xD9):
+            continue
+        if index + 2 > len(data):
+            return None
+        segment_length = int.from_bytes(data[index : index + 2], "big")
+        if segment_length < 2 or index + segment_length > len(data):
+            return None
+        if marker in sof_markers and segment_length >= 7:
+            height = int.from_bytes(data[index + 3 : index + 5], "big")
+            width = int.from_bytes(data[index + 5 : index + 7], "big")
+            return width, height
+        index += segment_length
+    return None

@@ -137,6 +137,45 @@ class WebAppStateTest(unittest.IsolatedAsyncioTestCase):
                 {"demo"},
             )
 
+    async def test_chat_passes_uploaded_attachments_to_agent_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=True):
+                with patch("agentic_llm.web.app.DeepSeekProvider", FakeProvider):
+                    app = WebAppState(root)
+                    attachments = app.save_uploads(
+                        session_id="demo",
+                        files=[
+                            {
+                                "filename": "note.txt",
+                                "content": b"hello attachment",
+                                "mime_type": "text/plain",
+                            }
+                        ],
+                    )
+                    await app.handle_chat(
+                        {
+                            "session_id": "demo",
+                            "message": "inspect this",
+                            "attachments": attachments,
+                        }
+                    )
+
+            latest_context = app.provider.calls[-1]
+            latest_user_message = latest_context[-1]["content"]
+            self.assertIn("inspect this", latest_user_message)
+            self.assertIn("Attached files are available", latest_user_message)
+            self.assertIn("Use inspect_file", latest_user_message)
+            self.assertIn("note.txt", latest_user_message)
+            self.assertIn(attachments[0]["path"], latest_user_message)
+            self.assertIn("inspect_file", {tool["name"] for tool in app.status()["tools"]})
+
+            history = app.session_history("demo")
+            self.assertEqual(history["messages"][0]["content"], "inspect this\n\nAttached: note.txt")
+            delete_result = app.delete_session("demo")
+            self.assertTrue(delete_result["deleted"])
+            self.assertFalse((root / attachments[0]["path"]).exists())
+
     async def test_session_history_renders_tool_hooks_as_system_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
