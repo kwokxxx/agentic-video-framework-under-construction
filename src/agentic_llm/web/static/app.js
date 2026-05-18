@@ -47,7 +47,6 @@ const els = {
   eventList: document.querySelector("#eventList"),
   runtimeCanvas: document.querySelector("#runtimeCanvas"),
   refreshButton: document.querySelector("#refreshButton"),
-  promptChips: document.querySelectorAll(".prompt-chip"),
 };
 
 function setView(view) {
@@ -238,8 +237,7 @@ function renderHistoryMessages(messages) {
 
 function renderEmptyMessages() {
   els.messageList.innerHTML = `<div class="empty-state">
-    <div class="mono-label">READY</div>
-    <p>No messages in this session yet.</p>
+    <p>Welcome back</p>
   </div>`;
 }
 
@@ -459,10 +457,10 @@ function updateComposerState() {
   els.chatForm.classList.toggle("is-busy", state.busy);
   els.chatForm.classList.toggle("is-uploading", state.uploading);
   els.sendButton.textContent = state.busy
-    ? "Running"
+    ? "..."
     : state.uploading
-      ? "Uploading"
-      : "Send";
+      ? "..."
+      : "↑";
 }
 
 async function sendMessage(message) {
@@ -856,14 +854,6 @@ els.messageInput.addEventListener("keydown", (event) => {
 
 els.messageInput.addEventListener("input", () => {
   saveCurrentDraft();
-});
-
-els.promptChips.forEach((chip) => {
-  chip.addEventListener("click", () => {
-    els.messageInput.value = chip.dataset.prompt || "";
-    saveCurrentDraft();
-    els.messageInput.focus();
-  });
 });
 
 els.sessionList.addEventListener("click", (event) => {
