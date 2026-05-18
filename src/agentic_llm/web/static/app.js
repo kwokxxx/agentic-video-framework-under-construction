@@ -91,6 +91,10 @@ function readDrafts() {
   }
 }
 
+function draftSessionIds() {
+  return Object.keys(readDrafts()).map(normalizeSessionId);
+}
+
 function writeDrafts(drafts) {
   try {
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
@@ -165,19 +169,28 @@ function renderSessionOptions() {
   const current = normalizeSessionId(state.currentSession);
   const seen = new Set();
   const sessions = [];
-  [...state.sessions, { id: current, message_count: 0 }].forEach((session) => {
+  const draftSessions = draftSessionIds().map((id) => ({
+    id,
+    message_count: 0,
+    draft: true,
+  }));
+  [...state.sessions, ...draftSessions, { id: current, message_count: 0 }].forEach((session) => {
     const id = normalizeSessionId(session.id);
     if (seen.has(id)) {
       return;
     }
     seen.add(id);
-    sessions.push({ ...session, id, persisted: state.sessions.some((item) => normalizeSessionId(item.id) === id) });
+    sessions.push({
+      ...session,
+      id,
+      persisted: state.sessions.some((item) => normalizeSessionId(item.id) === id),
+    });
   });
   els.sessionList.innerHTML = sessions
     .map((session) => {
       const count = Number(session.message_count || 0);
       const activeClass = session.id === current ? " active" : "";
-      const meta = count ? `${count} messages` : "No messages";
+      const meta = count ? `${count} messages` : session.draft ? "Draft" : "No messages";
       const deleteButton = session.persisted
         ? `<button type="button" class="session-delete" data-session="${escapeHtml(session.id)}" aria-label="Delete ${escapeHtml(session.id)}">Delete</button>`
         : "";
