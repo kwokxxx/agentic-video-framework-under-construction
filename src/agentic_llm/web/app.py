@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import threading
+import time
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 import uuid
@@ -22,7 +23,16 @@ from agentic_llm.context import ContextBuilder
 from agentic_llm.llm import DeepSeekProvider
 from agentic_llm.memory import MarkdownMemoryStore
 from agentic_llm.mq import AgentMainLoop, InboundMessage, InMemoryMessageQueue, SessionRouter
-from agentic_llm.runtime import CheckpointStore, CompositeHook, CronJob, CronJobStore, ThreadedCronService
+from agentic_llm.runtime import (
+    CheckpointStore,
+    CompositeHook,
+    CronJob,
+    CronJobStore,
+    CronSchedule,
+    ThreadedCronService,
+    create_cron_job,
+)
+from agentic_llm.runtime.cron import compute_next_run_ms
 from agentic_llm.session import JsonlHistoryStore
 from agentic_llm.skills import SkillLoader
 from agentic_llm.subagents import SubAgentManager
@@ -128,6 +138,26 @@ def _parse_upload_manifest(data: bytes) -> list[dict[str, Any]]:
     if not isinstance(parsed, list):
         return []
     return [item for item in parsed if isinstance(item, dict)]
+
+
+def _parse_automation_schedule(payload: dict[str, Any]) -> CronSchedule:
+    schedule = payload.get("schedule")
+    if not isinstance(schedule, dict):
+        raise ValueError("schedule is required")
+    parsed = CronSchedule.from_dict(schedule)
+    if parsed.kind in {"once", "at"} and parsed.run_at_ms is None:
+        raise ValueError("run_at_ms is required for one-time automations")
+    if parsed.kind == "cron" and not parsed.expr:
+        raise ValueError("cron expr is required for recurring automations")
+    if parsed.kind not in {"once", "at", "cron"}:
+        raise ValueError("schedule kind must be once, at, or cron")
+    return parsed
+
+
+def _automation_delete_after_run(payload: dict[str, Any], schedule: CronSchedule) -> bool:
+    if "delete_after_run" in payload:
+        return bool(payload.get("delete_after_run"))
+    return schedule.kind in {"once", "at"}
 
 
 class SessionLockManager:
@@ -479,6 +509,60 @@ class WebAppState:
     def list_sessions(self) -> list[dict[str, Any]]:
         return self.history_store.list_sessions()
 
+    def list_automations(self) -> list[dict[str, Any]]:
+        return [job.to_dict() for job in self.cron_store.list_jobs()]
+
+    def create_automation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        schedule = _parse_automation_schedule(payload)
+        description = str(payload.get("description") or "Untitled automation").strip()
+        prompt = str(payload.get("prompt") or "").strip()
+        if not prompt:
+            raise ValueError("prompt is required")
+        job = create_cron_job(
+            description=description or "Untitled automation",
+            prompt=prompt,
+            session_id=str(payload.get("session_id") or "default").strip() or "default",
+            schedule=schedule,
+            enabled=bool(payload.get("enabled", True)),
+            delete_after_run=_automation_delete_after_run(payload, schedule),
+            metadata={"source": "web"},
+        )
+        self.cron_store.upsert(job)
+        self.cron_service.arm_timer()
+        return job.to_dict()
+
+    def update_automation(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        job = self.cron_store.get(job_id)
+        if job is None:
+            raise ValueError(f"automation not found: {job_id}")
+        if "description" in payload:
+            job.description = str(payload.get("description") or "Untitled automation").strip()
+        if "prompt" in payload:
+            prompt = str(payload.get("prompt") or "").strip()
+            if not prompt:
+                raise ValueError("prompt is required")
+            job.prompt = prompt
+        if "session_id" in payload:
+            job.session_id = str(payload.get("session_id") or "default").strip() or "default"
+        if "enabled" in payload:
+            job.enabled = bool(payload.get("enabled"))
+        if "delete_after_run" in payload:
+            job.delete_after_run = bool(payload.get("delete_after_run"))
+        if "schedule" in payload:
+            job.schedule = _parse_automation_schedule(payload)
+            job.state.next_run_at_ms = compute_next_run_ms(
+                job.schedule,
+                int(time.time() * 1000),
+            )
+        self.cron_store.upsert(job)
+        self.cron_service.arm_timer()
+        return job.to_dict()
+
+    def delete_automation(self, job_id: str) -> dict[str, Any]:
+        deleted = self.cron_store.delete(job_id)
+        self.cron_service.arm_timer()
+        return {"id": job_id, "deleted": deleted}
+
     def delete_session(self, session_id: str) -> dict[str, Any]:
         deleted_history = self.history_store.delete_session(session_id)
         deleted_checkpoints = self.checkpoint_store.delete_session(session_id)
@@ -705,6 +789,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/sessions":
             self._send_json({"sessions": self.server.app_state.list_sessions()})
             return
+        if parsed.path == "/api/automations":
+            self._send_json({"automations": self.server.app_state.list_automations()})
+            return
         if parsed.path == "/api/history":
             query = parse_qs(parsed.query)
             session_id = (query.get("session_id", ["default"])[0] or "default").strip()
@@ -755,6 +842,24 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"attachments": attachments})
             return
 
+        if parsed.path == "/api/automation":
+            try:
+                payload = self._read_json()
+                automation = self.server.app_state.create_automation(payload)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:
+                self.server.app_state.trace.record(
+                    event_type="server.error",
+                    title="Automation create failed",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Automation create failed")
+                return
+            self._send_json({"automation": automation}, status=HTTPStatus.CREATED)
+            return
+
         if parsed.path != "/api/chat":
             self._send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
@@ -776,8 +881,46 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
         self._send_json(response)
 
+    def do_PUT(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/automation":
+            self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+
+        query = parse_qs(parsed.query)
+        job_id = (query.get("id", [""])[0] or "").strip()
+        if not job_id:
+            self._send_error(HTTPStatus.BAD_REQUEST, "id is required")
+            return
+
+        try:
+            payload = self._read_json()
+            automation = self.server.app_state.update_automation(job_id, payload)
+        except ValueError as exc:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except Exception as exc:
+            self.server.app_state.trace.record(
+                event_type="server.error",
+                title="Automation update failed",
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+            self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Automation update failed")
+            return
+
+        self._send_json({"automation": automation})
+
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/automation":
+            query = parse_qs(parsed.query)
+            job_id = (query.get("id", [""])[0] or "").strip()
+            if not job_id:
+                self._send_error(HTTPStatus.BAD_REQUEST, "id is required")
+                return
+            self._send_json(self.server.app_state.delete_automation(job_id))
+            return
+
         if parsed.path != "/api/session":
             self._send_error(HTTPStatus.NOT_FOUND, "Not found")
             return

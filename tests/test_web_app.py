@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -83,6 +84,49 @@ class WebAppStateTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(status["api_key_configured"])
             self.assertNotIn("test-secret", str(status))
+
+    async def test_automation_crud_uses_cron_store(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=True):
+                with patch("agentic_llm.web.app.DeepSeekProvider", FakeProvider):
+                    app = WebAppState(root)
+                    automation = app.create_automation(
+                        {
+                            "description": "Morning check",
+                            "prompt": "Summarize overnight changes.",
+                            "session_id": "demo",
+                            "enabled": True,
+                            "delete_after_run": False,
+                            "schedule": {"kind": "cron", "expr": "*/30 * * * *"},
+                        }
+                    )
+
+                    self.assertEqual(len(app.list_automations()), 1)
+                    self.assertEqual(automation["description"], "Morning check")
+                    self.assertEqual(automation["schedule"]["expr"], "*/30 * * * *")
+
+                    run_at_ms = int(time.time() * 1000) + 3600000
+                    updated = app.update_automation(
+                        automation["id"],
+                        {
+                            "description": "One shot",
+                            "prompt": "Run once.",
+                            "enabled": False,
+                            "schedule": {"kind": "once", "run_at_ms": run_at_ms},
+                            "delete_after_run": True,
+                        },
+                    )
+
+                    self.assertEqual(updated["description"], "One shot")
+                    self.assertFalse(updated["enabled"])
+                    self.assertEqual(updated["schedule"]["kind"], "once")
+                    self.assertEqual(updated["state"]["next_run_at_ms"], run_at_ms)
+
+                    delete_result = app.delete_automation(automation["id"])
+
+            self.assertTrue(delete_result["deleted"])
+            self.assertEqual(app.list_automations(), [])
 
     async def test_sessions_restore_history_and_preserve_agent_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

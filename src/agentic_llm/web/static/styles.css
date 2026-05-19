@@ -186,8 +186,15 @@ h3 {
   padding-top: 2px;
 }
 
-.conversation-main {
+.conversation-main,
+.automation-main {
   min-width: 0;
+  display: none;
+}
+
+.conversation-main.active,
+.automation-main.active {
+  display: block;
 }
 
 .conversation-header,
@@ -210,6 +217,124 @@ h3 {
   font-family: var(--font-mono);
   font-size: 12px;
   text-transform: uppercase;
+}
+
+.automation-sidebar {
+  display: grid;
+  gap: 12px;
+}
+
+.automation-home {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: #0f1013;
+  color: var(--body);
+  text-align: left;
+}
+
+.automation-home:hover,
+.automation-home.active {
+  border-color: var(--hairline);
+  color: var(--ink);
+}
+
+.automation-home-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  position: relative;
+}
+
+.automation-home-icon::before,
+.automation-home-icon::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 5px;
+  width: 2px;
+  background: currentColor;
+  transform-origin: bottom center;
+}
+
+.automation-home-icon::before {
+  height: 7px;
+}
+
+.automation-home-icon::after {
+  height: 6px;
+  transform: rotate(90deg);
+}
+
+.automation-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compact-button {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.automation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.automation-empty {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.automation-item {
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--body);
+  text-align: left;
+}
+
+.automation-item:hover,
+.automation-item.active {
+  border-color: var(--ink);
+}
+
+.automation-item.active {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.automation-item-title,
+.automation-item-meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-item-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.automation-item.active .automation-item-meta {
+  color: var(--canvas-mid);
 }
 
 .session-row {
@@ -550,6 +675,85 @@ h3 {
   color: var(--ink);
 }
 
+.automation-editor {
+  max-width: 860px;
+  display: grid;
+  gap: 16px;
+}
+
+.automation-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.automation-field input,
+.automation-field textarea,
+.automation-field select {
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-soft);
+  color: var(--ink);
+  outline: none;
+}
+
+.automation-field input,
+.automation-field select {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.automation-field textarea {
+  min-height: 180px;
+  resize: vertical;
+  padding: 12px;
+  text-transform: none;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.5fr);
+  gap: 12px;
+}
+
+.automation-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: var(--body);
+}
+
+.automation-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.primary-action {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.danger-action {
+  color: #ffb4b4;
+}
+
+.danger-action:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
 .developer-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
@@ -712,6 +916,10 @@ h3 {
   .composer .attachment-button {
     width: 40px;
     flex: 0 0 40px;
+  }
+
+  .automation-grid {
+    grid-template-columns: 1fr;
   }
 
   .developer-grid {

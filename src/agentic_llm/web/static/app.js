@@ -8,6 +8,9 @@ const state = {
   trace: [],
   status: null,
   sessions: [],
+  automations: [],
+  selectedAutomationId: null,
+  userMode: "conversation",
   currentSession: readStoredSessionId() || "demo",
   busy: false,
   uploading: false,
@@ -22,6 +25,8 @@ const els = {
   viewTabs: document.querySelectorAll(".view-tab"),
   userView: document.querySelector("#userView"),
   developerView: document.querySelector("#developerView"),
+  conversationMain: document.querySelector("#conversationMain"),
+  automationMain: document.querySelector("#automationMain"),
   chatForm: document.querySelector("#chatForm"),
   messageInput: document.querySelector("#messageInput"),
   sendButton: document.querySelector("#sendButton"),
@@ -35,6 +40,23 @@ const els = {
   sessionInput: document.querySelector("#sessionInput"),
   openSessionButton: document.querySelector("#openSessionButton"),
   sessionList: document.querySelector("#sessionList"),
+  automationHomeButton: document.querySelector("#automationHomeButton"),
+  newAutomationButton: document.querySelector("#newAutomationButton"),
+  automationList: document.querySelector("#automationList"),
+  automationForm: document.querySelector("#automationForm"),
+  automationId: document.querySelector("#automationId"),
+  automationDescription: document.querySelector("#automationDescription"),
+  automationPrompt: document.querySelector("#automationPrompt"),
+  automationSession: document.querySelector("#automationSession"),
+  automationScheduleKind: document.querySelector("#automationScheduleKind"),
+  automationCronField: document.querySelector("#automationCronField"),
+  automationCronExpr: document.querySelector("#automationCronExpr"),
+  automationRunAtField: document.querySelector("#automationRunAtField"),
+  automationRunAt: document.querySelector("#automationRunAt"),
+  automationEnabled: document.querySelector("#automationEnabled"),
+  automationDeleteAfterRun: document.querySelector("#automationDeleteAfterRun"),
+  deleteAutomationButton: document.querySelector("#deleteAutomationButton"),
+  backToChatButton: document.querySelector("#backToChatButton"),
   currentSessionLabel: document.querySelector("#currentSessionLabel"),
   messageList: document.querySelector("#messageList"),
   statusGrid: document.querySelector("#statusGrid"),
@@ -81,6 +103,13 @@ function persistSessionId(sessionId) {
 
 function getSessionId() {
   return normalizeSessionId(state.currentSession);
+}
+
+function setUserMode(mode) {
+  state.userMode = mode;
+  els.conversationMain.classList.toggle("active", mode === "conversation");
+  els.automationMain.classList.toggle("active", mode === "automation");
+  els.automationHomeButton.classList.toggle("active", mode === "automation");
 }
 
 function readDrafts() {
@@ -144,6 +173,7 @@ async function setSessionId(sessionId, { loadHistory = true, saveDraft = true } 
     await loadSessionHistory(normalized);
   }
   restoreDraftForSession(normalized);
+  setUserMode("conversation");
 }
 
 async function createSessionFromInput() {
@@ -163,6 +193,37 @@ async function loadSessions() {
   const payload = await response.json();
   state.sessions = payload.sessions || [];
   renderSessionOptions();
+}
+
+async function loadAutomations() {
+  const response = await fetch("/api/automations");
+  const payload = await response.json();
+  state.automations = payload.automations || [];
+  renderAutomationList();
+  if (
+    state.selectedAutomationId &&
+    !state.automations.some((automation) => automation.id === state.selectedAutomationId)
+  ) {
+    openAutomationEditor(null);
+  }
+}
+
+function renderAutomationList() {
+  if (!state.automations.length) {
+    els.automationList.innerHTML = `<div class="automation-empty">No automations yet</div>`;
+    return;
+  }
+  els.automationList.innerHTML = state.automations
+    .map((automation) => {
+      const activeClass = automation.id === state.selectedAutomationId ? " active" : "";
+      const title = automation.description || "Untitled automation";
+      const meta = `${automation.enabled ? "On" : "Off"} / ${formatAutomationSchedule(automation)}`;
+      return `<button type="button" class="automation-item${activeClass}" data-automation="${escapeHtml(automation.id)}">
+        <span class="automation-item-title">${escapeHtml(title)}</span>
+        <span class="automation-item-meta">${escapeHtml(meta)}</span>
+      </button>`;
+    })
+    .join("");
 }
 
 function renderSessionOptions() {
@@ -203,6 +264,137 @@ function renderSessionOptions() {
       </div>`;
     })
     .join("");
+}
+
+function openAutomationEditor(automationId) {
+  const automation = state.automations.find((item) => item.id === automationId) || null;
+  state.selectedAutomationId = automation ? automation.id : null;
+  setUserMode("automation");
+  fillAutomationForm(automation);
+  renderAutomationList();
+}
+
+function newAutomation() {
+  state.selectedAutomationId = null;
+  setUserMode("automation");
+  fillAutomationForm(null);
+  renderAutomationList();
+  els.automationDescription.focus();
+}
+
+function fillAutomationForm(automation) {
+  const schedule = automation && automation.schedule ? automation.schedule : { kind: "cron", expr: "*/30 * * * *" };
+  els.automationId.value = automation ? automation.id : "";
+  els.automationDescription.value = automation ? automation.description || "" : "";
+  els.automationPrompt.value = automation ? automation.prompt || "" : "";
+  els.automationSession.value = automation ? automation.session_id || getSessionId() : getSessionId();
+  els.automationScheduleKind.value = schedule.kind === "once" || schedule.kind === "at" ? "once" : "cron";
+  els.automationCronExpr.value = schedule.expr || "*/30 * * * *";
+  els.automationRunAt.value = schedule.run_at_ms ? datetimeLocalFromMs(schedule.run_at_ms) : defaultRunAtValue();
+  els.automationEnabled.checked = automation ? Boolean(automation.enabled) : true;
+  els.automationDeleteAfterRun.checked = automation ? Boolean(automation.delete_after_run) : false;
+  els.deleteAutomationButton.disabled = !automation;
+  renderAutomationScheduleFields();
+}
+
+function renderAutomationScheduleFields() {
+  const isCron = els.automationScheduleKind.value === "cron";
+  els.automationCronField.hidden = !isCron;
+  els.automationRunAtField.hidden = isCron;
+}
+
+function automationPayloadFromForm() {
+  const scheduleKind = els.automationScheduleKind.value;
+  const schedule = scheduleKind === "cron"
+    ? { kind: "cron", expr: els.automationCronExpr.value.trim() }
+    : { kind: "once", run_at_ms: msFromDatetimeLocal(els.automationRunAt.value) };
+  return {
+    description: els.automationDescription.value.trim() || "Untitled automation",
+    prompt: els.automationPrompt.value.trim(),
+    session_id: normalizeSessionId(els.automationSession.value),
+    enabled: els.automationEnabled.checked,
+    delete_after_run: els.automationDeleteAfterRun.checked,
+    schedule,
+  };
+}
+
+async function saveAutomation() {
+  const payload = automationPayloadFromForm();
+  if (!payload.prompt) {
+    window.alert("Task is required.");
+    return;
+  }
+  const automationId = els.automationId.value;
+  const response = await fetch(
+    automationId ? `/api/automation?id=${encodeURIComponent(automationId)}` : "/api/automation",
+    {
+      method: automationId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to save automation");
+  }
+  state.selectedAutomationId = result.automation.id;
+  await loadAutomations();
+  await loadStatus();
+  openAutomationEditor(result.automation.id);
+}
+
+async function deleteSelectedAutomation() {
+  const automationId = els.automationId.value;
+  if (!automationId) {
+    return;
+  }
+  if (!window.confirm("Delete this automation?")) {
+    return;
+  }
+  const response = await fetch(`/api/automation?id=${encodeURIComponent(automationId)}`, {
+    method: "DELETE",
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to delete automation");
+  }
+  state.selectedAutomationId = null;
+  await loadAutomations();
+  await loadStatus();
+  newAutomation();
+}
+
+function formatAutomationSchedule(automation) {
+  const schedule = automation.schedule || {};
+  if (schedule.kind === "cron") {
+    return schedule.expr || "cron";
+  }
+  return formatRunTime(schedule.run_at_ms);
+}
+
+function defaultRunAtValue() {
+  return datetimeLocalFromMs(Date.now() + 60 * 60 * 1000);
+}
+
+function datetimeLocalFromMs(ms) {
+  const date = new Date(Number(ms || Date.now()));
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function msFromDatetimeLocal(value) {
+  const ms = new Date(value).getTime();
+  if (!Number.isFinite(ms)) {
+    throw new Error("Run at time is required.");
+  }
+  return ms;
+}
+
+function formatRunTime(ms) {
+  if (!ms) {
+    return "not scheduled";
+  }
+  return new Date(Number(ms)).toLocaleString();
 }
 
 async function deleteSession(sessionId) {
@@ -520,6 +712,10 @@ async function loadStatus() {
   const payload = await response.json();
   state.status = payload;
   state.trace = payload.trace || state.trace;
+  if (Array.isArray(payload.cron_jobs)) {
+    state.automations = payload.cron_jobs;
+    renderAutomationList();
+  }
   renderStatus();
   renderTools();
   renderRuntimeExtensions();
@@ -563,6 +759,7 @@ async function initialize() {
   els.currentSessionLabel.textContent = state.currentSession;
   await loadStatus();
   await loadSessions();
+  await loadAutomations();
   await loadSessionHistory(state.currentSession);
   restoreDraftForSession(state.currentSession);
 }
@@ -800,6 +997,47 @@ function escapeHtml(value) {
 
 els.viewTabs.forEach((tab) => {
   tab.addEventListener("click", () => setView(tab.dataset.view));
+});
+
+els.automationHomeButton.addEventListener("click", () => {
+  if (state.selectedAutomationId) {
+    openAutomationEditor(state.selectedAutomationId);
+    return;
+  }
+  newAutomation();
+});
+
+els.newAutomationButton.addEventListener("click", () => {
+  newAutomation();
+});
+
+els.backToChatButton.addEventListener("click", () => {
+  setUserMode("conversation");
+});
+
+els.automationList.addEventListener("click", (event) => {
+  const item = event.target.closest(".automation-item");
+  if (!item) {
+    return;
+  }
+  openAutomationEditor(item.dataset.automation);
+});
+
+els.automationScheduleKind.addEventListener("change", () => {
+  renderAutomationScheduleFields();
+});
+
+els.automationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveAutomation().catch((error) => {
+    window.alert(error.message);
+  });
+});
+
+els.deleteAutomationButton.addEventListener("click", () => {
+  deleteSelectedAutomation().catch((error) => {
+    window.alert(error.message);
+  });
 });
 
 els.chatForm.addEventListener("submit", (event) => {

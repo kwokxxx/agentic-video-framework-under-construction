@@ -26,6 +26,18 @@
         <section class="panel user-view active" id="userView">
           <div class="user-layout">
             <aside class="session-sidebar" aria-label="Sessions">
+              <div class="automation-sidebar">
+                <button type="button" class="automation-home" id="automationHomeButton">
+                  <span class="automation-home-icon" aria-hidden="true"></span>
+                  <span>Automation</span>
+                </button>
+                <div class="automation-sidebar-header">
+                  <div class="mono-label">Tasks</div>
+                  <button type="button" class="outline-button compact-button" id="newAutomationButton">New</button>
+                </div>
+                <div class="automation-list" id="automationList"></div>
+              </div>
+
               <div class="session-sidebar-header">
                 <div class="mono-label">SESSIONS</div>
                 <h3>Conversations</h3>
@@ -40,7 +52,7 @@
               </label>
             </aside>
 
-            <div class="conversation-main">
+            <div class="conversation-main active" id="conversationMain">
               <div class="conversation-header">
                 <div>
                   <div class="mono-label">USER VIEW</div>
@@ -70,6 +82,57 @@
                   <textarea id="messageInput" rows="3" placeholder="Ask the agent to inspect code, summarize files, or explain the runtime flow."></textarea>
                 </div>
                 <button type="submit" id="sendButton" class="send-button" aria-label="Send" title="Send">&#8593;</button>
+              </form>
+            </div>
+
+            <div class="automation-main" id="automationMain">
+              <div class="conversation-header">
+                <div>
+                  <div class="mono-label">AUTOMATION</div>
+                  <h2>Task Editor</h2>
+                </div>
+                <button type="button" id="backToChatButton" class="outline-button">Back to chat</button>
+              </div>
+
+              <form class="automation-editor" id="automationForm">
+                <input type="hidden" id="automationId" />
+                <label class="automation-field">
+                  <span>Name</span>
+                  <input id="automationDescription" autocomplete="off" placeholder="Daily project check-in" />
+                </label>
+                <label class="automation-field">
+                  <span>Task</span>
+                  <textarea id="automationPrompt" rows="7" placeholder="What should the agent do when this automation runs?"></textarea>
+                </label>
+                <div class="automation-grid">
+                  <label class="automation-field">
+                    <span>Session</span>
+                    <input id="automationSession" autocomplete="off" />
+                  </label>
+                  <label class="automation-field">
+                    <span>Schedule</span>
+                    <select id="automationScheduleKind">
+                      <option value="cron">Recurring</option>
+                      <option value="once">Once</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="automation-field" id="automationCronField">
+                  <span>Cron expression</span>
+                  <input id="automationCronExpr" autocomplete="off" placeholder="*/30 * * * *" />
+                </label>
+                <label class="automation-field" id="automationRunAtField">
+                  <span>Run at</span>
+                  <input id="automationRunAt" type="datetime-local" />
+                </label>
+                <div class="automation-options">
+                  <label><input id="automationEnabled" type="checkbox" checked /> Enabled</label>
+                  <label><input id="automationDeleteAfterRun" type="checkbox" /> Delete after run</label>
+                </div>
+                <div class="automation-actions">
+                  <button type="submit" class="outline-button primary-action" id="saveAutomationButton">Save automation</button>
+                  <button type="button" class="outline-button danger-action" id="deleteAutomationButton">Delete</button>
+                </div>
               </form>
             </div>
           </div>
